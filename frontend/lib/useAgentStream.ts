@@ -1,0 +1,247 @@
+"use client";
+
+import { useState, useEffect, useCallback, useRef } from "react";
+import { BACKEND_URL } from "./api";
+import type {
+  AgentState,
+  TimelineStepData,
+  ConsoleEntry,
+  MetricsDataPoint,
+} from "./types";
+
+const STEP_DEFINITIONS: Record<string, { title: string; subtitle: string }> = {
+  monitoring: {
+    title: "Monitoring",
+    subtitle: "Checking TradePulse p99 latency",
+  },
+  anomaly_detected: {
+    title: "Anomaly Detected",
+    subtitle: "p99 latency threshold breached",
+  },
+  incident_created: {
+    title: "PagerDuty",
+    subtitle: "Incident created",
+  },
+  investigating: {
+    title: "GitHub Investigation",
+    subtitle: "Retrieving pricing_client.py",
+  },
+  analyzing: {
+    title: "Code Analysis",
+    subtitle: "Identifying missing patterns",
+  },
+  fix_generated: {
+    title: "Fix Generated",
+    subtitle: "Optimized code ready",
+  },
+  ticket_created: {
+    title: "Jira Ticket",
+    subtitle: "Ticket created for review",
+  },
+  awaiting_approval: {
+    title: "Human Approval",
+    subtitle: "Waiting for approval",
+  },
+  approved: {
+    title: "Approved",
+    subtitle: "Human approved the fix",
+  },
+  resolved: {
+    title: "Resolved",
+    subtitle: "Incident closed, change logged",
+  },
+  rejected: {
+    title: "Rejected",
+    subtitle: "Human rejected the fix",
+  },
+  error: {
+    title: "Error",
+    subtitle: "An error occurred",
+  },
+};
+
+export function useAgentStream() {
+  const [currentState, setCurrentState] = useState<AgentState>("idle");
+  const [steps, setSteps] = useState<TimelineStepData[]>([]);
+  const [consoleLog, setConsoleLog] = useState<ConsoleEntry[]>([]);
+  const [metrics, setMetrics] = useState<MetricsDataPoint[]>([]);
+  const [isConnected, setIsConnected] = useState(false);
+  const [jiraUrl, setJiraUrl] = useState<string>("");
+  const [originalCode, setOriginalCode] = useState<string>("");
+  const [optimizedCode, setOptimizedCode] = useState<string>("");
+  const eventSourceRef = useRef<EventSource | null>(null);
+  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const addConsoleEntry = useCallback(
+    (type: ConsoleEntry["type"], data: Record<string, unknown>) => {
+      setConsoleLog((prev) => [
+        ...prev,
+        {
+          id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          type,
+          timestamp: new Date().toISOString(),
+          data,
+        },
+      ]);
+    },
+    []
+  );
+
+  const updateSteps = useCallback(
+    (state: AgentState, extraData?: Record<string, unknown>) => {
+      const def = STEP_DEFINITIONS[state];
+      if (!def) return;
+
+      setSteps((prev) => {
+        const updated = prev.map((step) => {
+          if (step.status === "active") {
+            return { ...step, status: "done" as const };
+          }
+          return step;
+        });
+
+        const existing = updated.find((s) => s.id === state);
+        if (existing) {
+          return updated.map((s) =>
+            s.id === state
+              ? { ...s, status: "active" as const, data: extraData }
+              : s
+          );
+        }
+
+        return [
+          ...updated,
+          {
+            id: state,
+            status: "active" as const,
+            title: def.title,
+            subtitle: def.subtitle,
+            data: extraData,
+            timestamp: new Date().toISOString(),
+          },
+        ];
+      });
+    },
+    []
+  );
+
+  const connect = useCallback(() => {
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close();
+    }
+
+    const es = new EventSource(`${BACKEND_URL}/events`);
+    eventSourceRef.current = es;
+
+    es.onopen = () => {
+      setIsConnected(true);
+    };
+
+    es.addEventListener("state_change", (event) => {
+      const data = JSON.parse(event.data);
+      const state = data.state as AgentState;
+      setCurrentState(state);
+      updateSteps(state, data);
+      addConsoleEntry("state_change", data);
+
+      if (data.jira_url) {
+        setJiraUrl(data.jira_url);
+      }
+
+      if (state === "idle") {
+        setSteps((prev) =>
+          prev.map((s) =>
+            s.status === "active" ? { ...s, status: "done" as const } : s
+          )
+        );
+      }
+    });
+
+    es.addEventListener("agent_thinking", (event) => {
+      const data = JSON.parse(event.data);
+      addConsoleEntry("thinking", data);
+    });
+
+    es.addEventListener("tool_call", (event) => {
+      const data = JSON.parse(event.data);
+      addConsoleEntry("tool_call", data);
+
+      if (
+        data.tool === "investigate_github_source" &&
+        data.output?.content
+      ) {
+        setOriginalCode(data.output.content as string);
+      }
+      if (
+        data.tool === "generate_optimized_code" &&
+        data.output?.optimized_code
+      ) {
+        setOptimizedCode(data.output.optimized_code as string);
+      }
+
+      if (data.output?.p99_latency_ms != null) {
+        setMetrics((prev) => [
+          ...prev,
+          {
+            time: Date.now(),
+            value: data.output.p99_latency_ms as number,
+          },
+        ]);
+      }
+    });
+
+    es.addEventListener("error", (event) => {
+      try {
+        const data = JSON.parse((event as MessageEvent).data);
+        addConsoleEntry("error", data);
+      } catch {
+        // SSE connection error, not a data event
+      }
+    });
+
+    es.addEventListener("keepalive", () => {
+      // Just confirms connection is alive
+    });
+
+    es.onerror = () => {
+      setIsConnected(false);
+      es.close();
+      // Reconnect after 2s
+      reconnectTimeoutRef.current = setTimeout(() => {
+        connect();
+      }, 2000);
+    };
+  }, [addConsoleEntry, updateSteps]);
+
+  useEffect(() => {
+    connect();
+    return () => {
+      eventSourceRef.current?.close();
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+      }
+    };
+  }, [connect]);
+
+  const resetStream = useCallback(() => {
+    setSteps([]);
+    setConsoleLog([]);
+    setMetrics([]);
+    setCurrentState("idle");
+    setJiraUrl("");
+    setOriginalCode("");
+    setOptimizedCode("");
+  }, []);
+
+  return {
+    currentState,
+    steps,
+    consoleLog,
+    metrics,
+    isConnected,
+    jiraUrl,
+    originalCode,
+    optimizedCode,
+    resetStream,
+  };
+}
