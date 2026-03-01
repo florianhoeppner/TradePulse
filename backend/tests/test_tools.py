@@ -44,7 +44,7 @@ class TestToolDefinitions:
 class TestDetectLatencyAnomaly:
     @pytest.mark.asyncio
     @respx.mock
-    async def test_returns_latency_data(self):
+    async def test_returns_latency_data_from_prometheus(self):
         respx.get("http://prometheus:9090/api/v1/query").mock(
             return_value=httpx.Response(200, json={
                 "status": "success",
@@ -59,10 +59,33 @@ class TestDetectLatencyAnomaly:
         assert result["p99_latency_ms"] == 3240.0
         assert result["breached"] is True
         assert result["threshold_ms"] == 2000
+        assert result["source"] == "prometheus"
 
     @pytest.mark.asyncio
     @respx.mock
-    async def test_no_breach(self):
+    async def test_falls_back_to_trading_service(self):
+        # Prometheus fails
+        respx.get("http://prometheus:9090/api/v1/query").mock(
+            return_value=httpx.Response(500, text="Internal Server Error")
+        )
+        # Trading service responds
+        respx.get("http://trading-service:8001/metrics/summary").mock(
+            return_value=httpx.Response(200, json={
+                "p99_latency_ms": 3100.0,
+                "total_orders": 50,
+                "chaos_mode": True,
+                "timestamp": "2026-03-01T00:00:00Z",
+            })
+        )
+
+        result = await tool_detect_latency_anomaly()
+        assert result["p99_latency_ms"] == 3100.0
+        assert result["breached"] is True
+        assert result["source"] == "trading-service"
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_no_breach_from_prometheus(self):
         respx.get("http://prometheus:9090/api/v1/query").mock(
             return_value=httpx.Response(200, json={
                 "status": "success",
@@ -79,9 +102,12 @@ class TestDetectLatencyAnomaly:
 
     @pytest.mark.asyncio
     @respx.mock
-    async def test_handles_prometheus_error(self):
+    async def test_handles_both_sources_failing(self):
         respx.get("http://prometheus:9090/api/v1/query").mock(
-            return_value=httpx.Response(500, text="Internal Server Error")
+            return_value=httpx.Response(500, text="error")
+        )
+        respx.get("http://trading-service:8001/metrics/summary").mock(
+            return_value=httpx.Response(500, text="error")
         )
 
         result = await tool_detect_latency_anomaly()

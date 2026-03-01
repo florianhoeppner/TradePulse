@@ -4,10 +4,12 @@ Simulated order execution platform with real market data and Prometheus metrics.
 """
 
 import asyncio
+import collections
 import random
 import time
 import uuid
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 
 from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -36,6 +38,13 @@ PRICING_ERRORS = Counter(
     ["symbol", "error_type"],
 )
 
+# --- Latency Tracker (direct p99 without Prometheus) ---
+
+MAX_LATENCY_SAMPLES = 200
+latency_samples: collections.deque[float] = collections.deque(maxlen=MAX_LATENCY_SAMPLES)
+order_count = 0
+error_count = 0
+
 # --- Globals ---
 
 pricing_client = PricingClient()
@@ -44,22 +53,27 @@ background_task = None
 
 async def simulate_orders():
     """Background task: execute simulated orders every 2 seconds to generate metrics."""
+    global order_count, error_count
     while True:
         symbol = random.choice(SUPPORTED_SYMBOLS)
         try:
             start = time.monotonic()
-            # Run the synchronous pricing call in a thread to not block the event loop
             loop = asyncio.get_event_loop()
             price = await loop.run_in_executor(None, pricing_client.get_price, symbol)
             elapsed = time.monotonic() - start
 
             ORDER_LATENCY.observe(elapsed)
             ORDERS_TOTAL.labels(symbol=symbol, status="success").inc()
+            latency_samples.append(elapsed * 1000)  # store in ms
+            order_count += 1
         except Exception as e:
             elapsed = time.monotonic() - start
             ORDER_LATENCY.observe(elapsed)
             ORDERS_TOTAL.labels(symbol=symbol, status="error").inc()
             PRICING_ERRORS.labels(symbol=symbol, error_type=type(e).__name__).inc()
+            latency_samples.append(elapsed * 1000)
+            order_count += 1
+            error_count += 1
 
         await asyncio.sleep(2)
 
@@ -111,6 +125,7 @@ async def metrics():
 @app.post("/orders")
 async def create_order(symbol: str = "AAPL", quantity: int = 100):
     """Execute a simulated order using live market prices."""
+    global order_count, error_count
     order_id = str(uuid.uuid4())[:8]
 
     try:
@@ -121,6 +136,8 @@ async def create_order(symbol: str = "AAPL", quantity: int = 100):
 
         ORDER_LATENCY.observe(elapsed)
         ORDERS_TOTAL.labels(symbol=symbol, status="success").inc()
+        latency_samples.append(elapsed * 1000)
+        order_count += 1
 
         return {
             "order_id": order_id,
@@ -136,6 +153,9 @@ async def create_order(symbol: str = "AAPL", quantity: int = 100):
         ORDER_LATENCY.observe(elapsed)
         ORDERS_TOTAL.labels(symbol=symbol, status="error").inc()
         PRICING_ERRORS.labels(symbol=symbol, error_type=type(e).__name__).inc()
+        latency_samples.append(elapsed * 1000)
+        order_count += 1
+        error_count += 1
 
         return {
             "order_id": order_id,
@@ -164,3 +184,28 @@ async def chaos_disable():
 @app.get("/chaos/status")
 async def chaos_status():
     return {"chaos_mode": pricing_client.chaos_mode}
+
+
+@app.get("/metrics/summary")
+async def metrics_summary():
+    """Return computed p99 latency and order counts directly — no Prometheus needed."""
+    samples = list(latency_samples)
+    if samples:
+        samples_sorted = sorted(samples)
+        idx_p99 = int(len(samples_sorted) * 0.99)
+        idx_p50 = int(len(samples_sorted) * 0.50)
+        p99 = round(samples_sorted[min(idx_p99, len(samples_sorted) - 1)], 1)
+        p50 = round(samples_sorted[min(idx_p50, len(samples_sorted) - 1)], 1)
+    else:
+        p99 = 0.0
+        p50 = 0.0
+
+    return {
+        "p99_latency_ms": p99,
+        "p50_latency_ms": p50,
+        "total_orders": order_count,
+        "total_errors": error_count,
+        "sample_count": len(samples),
+        "chaos_mode": pricing_client.chaos_mode,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }

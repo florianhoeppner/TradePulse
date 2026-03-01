@@ -189,7 +189,12 @@ TOOLS = [
 
 
 async def tool_detect_latency_anomaly() -> dict[str, Any]:
-    """Query Prometheus for p99 latency metrics."""
+    """Query trading service metrics to check p99 latency.
+
+    Tries Prometheus first; falls back to the trading service's
+    /metrics/summary endpoint which computes p99 directly.
+    """
+    # Strategy 1: Try Prometheus
     try:
         async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
             query = "histogram_quantile(0.99, rate(tradepulse_order_latency_seconds_bucket[5m]))"
@@ -212,11 +217,31 @@ async def tool_detect_latency_anomaly() -> dict[str, Any]:
                 "threshold_ms": 2000,
                 "breached": p99_ms > 2000,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
-                "raw_result": result[:3],
+                "source": "prometheus",
+            }
+    except Exception:
+        pass  # Fall through to strategy 2
+
+    # Strategy 2: Query trading service directly
+    try:
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+            response = await client.get(f"{TRADING_SERVICE_URL}/metrics/summary")
+            response.raise_for_status()
+            data = response.json()
+
+            p99_ms = data.get("p99_latency_ms", 0.0)
+            return {
+                "p99_latency_ms": p99_ms,
+                "threshold_ms": 2000,
+                "breached": p99_ms > 2000,
+                "timestamp": data.get("timestamp", datetime.now(timezone.utc).isoformat()),
+                "total_orders": data.get("total_orders", 0),
+                "chaos_mode": data.get("chaos_mode", False),
+                "source": "trading-service",
             }
     except Exception as e:
         return {
-            "error": f"Failed to query Prometheus: {str(e)}",
+            "error": f"Failed to query metrics: {str(e)}",
             "p99_latency_ms": None,
             "threshold_ms": 2000,
             "breached": None,
