@@ -19,6 +19,14 @@ export default function AdminPage() {
   const [chaosEnabled, setChaosEnabled] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
   const [loading, setLoading] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  // Auto-dismiss error after 6 seconds
+  useEffect(() => {
+    if (!actionError) return;
+    const timer = setTimeout(() => setActionError(null), 6000);
+    return () => clearTimeout(timer);
+  }, [actionError]);
 
   const loadData = useCallback(async () => {
     const [configRes, historyRes] = await Promise.all([
@@ -48,25 +56,38 @@ export default function AdminPage() {
       return;
     }
     setLoading("reset");
-    await resetDemo();
+    setActionError(null);
+    const res = await resetDemo();
     resetStream();
     setConfirmReset(false);
     setLoading(null);
+    if (!res.ok) {
+      setActionError(res.error ?? "Failed to reset demo");
+    }
     await loadData();
   };
 
   const handleChaosToggle = async () => {
     setLoading("chaos");
+    setActionError(null);
     const newState = !chaosEnabled;
-    await toggleChaos(newState);
-    setChaosEnabled(newState);
+    const res = await toggleChaos(newState);
     setLoading(null);
+    if (!res.ok) {
+      setActionError(res.error ?? `Failed to ${newState ? "enable" : "disable"} chaos mode`);
+    } else {
+      setChaosEnabled(newState);
+    }
   };
 
   const handleManualTrigger = async () => {
     setLoading("trigger");
-    await startAgent();
+    setActionError(null);
+    const res = await startAgent();
     setLoading(null);
+    if (!res.ok) {
+      setActionError(res.error ?? "Failed to start agent");
+    }
   };
 
   return (
@@ -80,6 +101,19 @@ export default function AdminPage() {
             Demo controls, configuration, and run history
           </p>
         </div>
+
+        {/* Error banner */}
+        {actionError && (
+          <div className="mb-4 px-4 py-3 rounded-md bg-accent-red/10 border border-accent-red/30 flex items-center justify-between">
+            <span className="text-sm text-accent-red">{actionError}</span>
+            <button
+              onClick={() => setActionError(null)}
+              className="text-accent-red/60 hover:text-accent-red text-lg leading-none ml-4"
+            >
+              &times;
+            </button>
+          </div>
+        )}
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {/* Controls */}
