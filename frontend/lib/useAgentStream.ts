@@ -65,12 +65,31 @@ export function useAgentStream() {
   const [steps, setSteps] = useState<TimelineStepData[]>([]);
   const [consoleLog, setConsoleLog] = useState<ConsoleEntry[]>([]);
   const [metrics, setMetrics] = useState<MetricsDataPoint[]>([]);
-  const [isConnected, setIsConnected] = useState(false);
+  const [sseConnected, setSseConnected] = useState(false);
+  const [backendReachable, setBackendReachable] = useState(false);
   const [jiraUrl, setJiraUrl] = useState<string>("");
   const [originalCode, setOriginalCode] = useState<string>("");
   const [optimizedCode, setOptimizedCode] = useState<string>("");
   const eventSourceRef = useRef<EventSource | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Derive connection status: connected if SSE works OR backend is reachable via HTTP
+  const isConnected = sseConnected || backendReachable;
+
+  // Periodic health check as fallback for connection status
+  useEffect(() => {
+    const checkHealth = async () => {
+      try {
+        const res = await fetch(`${BACKEND_URL}/health`, { method: "GET" });
+        setBackendReachable(res.ok);
+      } catch {
+        setBackendReachable(false);
+      }
+    };
+    checkHealth();
+    const intervalId = setInterval(checkHealth, 10_000);
+    return () => clearInterval(intervalId);
+  }, []);
 
   const addConsoleEntry = useCallback(
     (type: ConsoleEntry["type"], data: Record<string, unknown>) => {
@@ -134,7 +153,7 @@ export function useAgentStream() {
     eventSourceRef.current = es;
 
     es.onopen = () => {
-      setIsConnected(true);
+      setSseConnected(true);
     };
 
     es.addEventListener("state_change", (event) => {
@@ -204,7 +223,7 @@ export function useAgentStream() {
     });
 
     es.onerror = () => {
-      setIsConnected(false);
+      setSseConnected(false);
       es.close();
       // Reconnect after 2s
       reconnectTimeoutRef.current = setTimeout(() => {
