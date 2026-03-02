@@ -27,7 +27,7 @@ async function apiCall<T = unknown>(
     return { ok: true, data };
   } catch (e) {
     const message = e instanceof Error ? e.message : "Network error";
-    return { ok: false, error: `Could not reach backend: ${message}` };
+    return { ok: false, error: `Could not reach backend (${BACKEND_URL}): ${message}` };
   }
 }
 
