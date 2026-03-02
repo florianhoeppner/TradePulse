@@ -7,8 +7,8 @@ interface ApprovalCardProps {
   jiraUrl: string;
   originalCode: string;
   optimizedCode: string;
-  onApprove: () => void;
-  onReject: () => void;
+  onApprove: () => Promise<void>;
+  onReject: () => Promise<void>;
 }
 
 export default function ApprovalCard({
@@ -23,12 +23,14 @@ export default function ApprovalCard({
 
   const handleApprove = async () => {
     setLoading("approve");
-    onApprove();
+    await onApprove();
+    setLoading(null);
   };
 
   const handleReject = async () => {
     setLoading("reject");
-    onReject();
+    await onReject();
+    setLoading(null);
   };
 
   return (

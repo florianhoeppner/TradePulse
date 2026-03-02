@@ -1,5 +1,6 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import { useAgentStream } from "@/lib/useAgentStream";
 import { startAgent, approveAction, rejectAction } from "@/lib/api";
 import Navbar from "@/components/Navbar";
@@ -20,20 +21,44 @@ export default function Dashboard() {
     optimizedCode,
   } = useAgentStream();
 
+  const [actionLoading, setActionLoading] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  // Auto-dismiss error after 6 seconds
+  useEffect(() => {
+    if (!actionError) return;
+    const timer = setTimeout(() => setActionError(null), 6000);
+    return () => clearTimeout(timer);
+  }, [actionError]);
+
   const lastThinking = [...consoleLog]
     .reverse()
     .find((e) => e.type === "thinking");
 
   const handleStart = async () => {
-    await startAgent();
+    setActionLoading(true);
+    setActionError(null);
+    const res = await startAgent();
+    setActionLoading(false);
+    if (!res.ok) {
+      setActionError(res.error ?? "Failed to start agent");
+    }
   };
 
   const handleApprove = async () => {
-    await approveAction();
+    setActionError(null);
+    const res = await approveAction();
+    if (!res.ok) {
+      setActionError(res.error ?? "Failed to approve fix");
+    }
   };
 
   const handleReject = async () => {
-    await rejectAction();
+    setActionError(null);
+    const res = await rejectAction();
+    if (!res.ok) {
+      setActionError(res.error ?? "Failed to reject fix");
+    }
   };
 
   const statusLabel: Record<string, { text: string; color: string }> = {
@@ -78,13 +103,27 @@ export default function Dashboard() {
             {currentState === "idle" && (
               <button
                 onClick={handleStart}
-                className="px-4 py-2 rounded-md bg-accent-blue hover:bg-accent-blue/90 text-white font-medium text-sm transition-colors"
+                disabled={actionLoading}
+                className="px-4 py-2 rounded-md bg-accent-blue hover:bg-accent-blue/90 text-white font-medium text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                Start Demo
+                {actionLoading ? "Starting..." : "Start Demo"}
               </button>
             )}
           </div>
         </div>
+
+        {/* Error banner */}
+        {actionError && (
+          <div className="mb-4 px-4 py-3 rounded-md bg-accent-red/10 border border-accent-red/30 flex items-center justify-between">
+            <span className="text-sm text-accent-red">{actionError}</span>
+            <button
+              onClick={() => setActionError(null)}
+              className="text-accent-red/60 hover:text-accent-red text-lg leading-none ml-4"
+            >
+              &times;
+            </button>
+          </div>
+        )}
 
         {/* Two column layout */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
