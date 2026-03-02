@@ -20,9 +20,14 @@ async function apiCall<T = unknown>(
     if (!response.ok) {
       return { ok: false, error: data.error || data.detail || "Request failed" };
     }
+    // Backend may return 200 with an error field when downstream services fail
+    if (data.error) {
+      return { ok: false, error: data.error };
+    }
     return { ok: true, data };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "Network error" };
+    const message = e instanceof Error ? e.message : "Network error";
+    return { ok: false, error: `Could not reach backend: ${message}` };
   }
 }
 

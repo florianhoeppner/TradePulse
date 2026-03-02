@@ -14,6 +14,7 @@ from typing import AsyncGenerator
 import httpx
 from fastapi import FastAPI, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from sse_starlette.sse import EventSourceResponse
 
 from state import AgentState, DemoState, RunHistory
@@ -254,14 +255,20 @@ async def admin_reset():
 async def admin_chaos(mode: str):
     """Toggle chaos mode on the trading service."""
     if mode not in ("enable", "disable"):
-        return {"error": "Mode must be 'enable' or 'disable'"}
+        return JSONResponse(
+            status_code=422,
+            content={"error": "Mode must be 'enable' or 'disable'"},
+        )
 
     try:
         async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
             response = await client.post(f"{TRADING_SERVICE_URL}/chaos/{mode}")
             return response.json()
     except Exception as e:
-        return {"error": f"Failed to toggle chaos mode: {str(e)}"}
+        return JSONResponse(
+            status_code=502,
+            content={"error": f"Failed to toggle chaos mode: {str(e)}"},
+        )
 
 
 @app.get("/admin/config")
