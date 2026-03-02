@@ -28,6 +28,8 @@ export default function AdminPage() {
     return () => clearTimeout(timer);
   }, [actionError]);
 
+  const [configError, setConfigError] = useState<string | null>(null);
+
   const loadData = useCallback(async () => {
     const [configRes, historyRes] = await Promise.all([
       getConfig(),
@@ -37,6 +39,9 @@ export default function AdminPage() {
       setConfig(
         (configRes.data as { config: Record<string, ConfigEntry> }).config
       );
+      setConfigError(null);
+    } else if (configRes.error) {
+      setConfigError(configRes.error);
     }
     if (historyRes.ok && historyRes.data) {
       setHistory(
@@ -204,7 +209,9 @@ export default function AdminPage() {
                 </div>
               ))}
               {Object.keys(config).length === 0 && (
-                <p className="text-gray-500 text-xs">Loading config...</p>
+                <p className={`text-xs ${configError ? "text-accent-red" : "text-gray-500"}`}>
+                  {configError ?? "Loading config..."}
+                </p>
               )}
             </div>
           </div>
