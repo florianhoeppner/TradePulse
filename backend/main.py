@@ -5,11 +5,14 @@ FastAPI server with SSE streaming for real-time agent progress.
 
 import asyncio
 import json
+import logging
 import os
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import AsyncGenerator
+
+logger = logging.getLogger("tradepulse.backend")
 
 import httpx
 from fastapi import FastAPI, BackgroundTasks
@@ -72,6 +75,8 @@ async def broadcast_events():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global broadcast_task
+    port = os.environ.get("PORT", "8000")
+    logger.info("TradePulse backend starting on port %s", port)
     broadcast_task = asyncio.create_task(broadcast_events())
     yield
     broadcast_task.cancel()
