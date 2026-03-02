@@ -22,9 +22,6 @@
         "healthcheckTimeout": 300,
         "restartPolicyType": "ON_FAILURE",
         "restartPolicyMaxRetries": 5
-      },
-      "networking": {
-        "servicePort": 8000
       }
     },
     "trading-service": {
@@ -40,9 +37,6 @@
         "healthcheckTimeout": 300,
         "restartPolicyType": "ON_FAILURE",
         "restartPolicyMaxRetries": 5
-      },
-      "networking": {
-        "servicePort": 8001
       }
     }
   }
