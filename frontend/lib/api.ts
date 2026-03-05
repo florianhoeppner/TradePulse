@@ -65,4 +65,16 @@ export function getConfig() {
   return apiCall("/admin/config");
 }
 
+export function fetchMarketPrices() {
+  return apiCall("/market/prices");
+}
+
+export function fetchMarketActivity() {
+  return apiCall("/market/activity");
+}
+
+export function fetchMarketCommentary() {
+  return apiCall("/market/commentary", { method: "POST" });
+}
+
 export { BACKEND_URL };

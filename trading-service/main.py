@@ -45,6 +45,37 @@ latency_samples: collections.deque[float] = collections.deque(maxlen=MAX_LATENCY
 order_count = 0
 error_count = 0
 
+# --- Trade Activity Log ---
+
+MAX_ACTIVITY_LOG = 50
+
+
+class TradeEntry:
+    __slots__ = ("symbol", "side", "quantity", "price", "latency_ms", "timestamp", "status")
+
+    def __init__(self, symbol, side, quantity, price, latency_ms, timestamp, status):
+        self.symbol = symbol
+        self.side = side
+        self.quantity = quantity
+        self.price = price
+        self.latency_ms = latency_ms
+        self.timestamp = timestamp
+        self.status = status
+
+    def to_dict(self):
+        return {
+            "symbol": self.symbol,
+            "side": self.side,
+            "quantity": self.quantity,
+            "price": self.price,
+            "latency_ms": self.latency_ms,
+            "timestamp": self.timestamp,
+            "status": self.status,
+        }
+
+
+trade_activity: collections.deque[TradeEntry] = collections.deque(maxlen=MAX_ACTIVITY_LOG)
+
 # --- Globals ---
 
 pricing_client = PricingClient()
@@ -56,6 +87,8 @@ async def simulate_orders():
     global order_count, error_count
     while True:
         symbol = random.choice(SUPPORTED_SYMBOLS)
+        side = random.choice(["BUY", "SELL"])
+        quantity = random.choice([50, 100, 200, 500, 1000])
         try:
             start = time.monotonic()
             loop = asyncio.get_event_loop()
@@ -66,6 +99,13 @@ async def simulate_orders():
             ORDERS_TOTAL.labels(symbol=symbol, status="success").inc()
             latency_samples.append(elapsed * 1000)  # store in ms
             order_count += 1
+
+            trade_activity.append(TradeEntry(
+                symbol=symbol, side=side, quantity=quantity, price=price,
+                latency_ms=round(elapsed * 1000, 1),
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                status="filled",
+            ))
         except Exception as e:
             elapsed = time.monotonic() - start
             ORDER_LATENCY.observe(elapsed)
@@ -74,6 +114,13 @@ async def simulate_orders():
             latency_samples.append(elapsed * 1000)
             order_count += 1
             error_count += 1
+
+            trade_activity.append(TradeEntry(
+                symbol=symbol, side=side, quantity=quantity, price=None,
+                latency_ms=round(elapsed * 1000, 1),
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                status="error",
+            ))
 
         await asyncio.sleep(2)
 
@@ -167,6 +214,18 @@ async def create_order(symbol: str = "AAPL", quantity: int = 100):
             "status": "error",
             "error": str(e),
         }
+
+
+@app.get("/market/prices")
+async def market_prices():
+    """Return current prices, changes, and history for all monitored symbols."""
+    return {"quotes": pricing_client.get_all_quotes()}
+
+
+@app.get("/market/activity")
+async def market_activity():
+    """Return recent trade activity log."""
+    return {"trades": [t.to_dict() for t in list(trade_activity)[-15:]]}
 
 
 @app.post("/chaos/enable")
