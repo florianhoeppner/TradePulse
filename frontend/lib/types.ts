@@ -54,3 +54,23 @@ export interface ConfigEntry {
   configured: boolean;
   length: number;
 }
+
+export interface StockQuote {
+  symbol: string;
+  name: string;
+  price: number;
+  change: number;
+  changePercent: number;
+  lastUpdated: string;
+  history: number[];
+}
+
+export interface TradeActivity {
+  symbol: string;
+  side: "BUY" | "SELL";
+  quantity: number;
+  price: number | null;
+  latency_ms: number;
+  timestamp: string;
+  status: "filled" | "error";
+}

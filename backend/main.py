@@ -24,6 +24,7 @@ from state import AgentState, DemoState, RunHistory
 from agent import (
     run_agent,
     PAGERDUTY_ROUTING_KEY,
+    ANTHROPIC_API_KEY,
     HTTP_TIMEOUT,
 )
 
@@ -293,6 +294,107 @@ async def admin_config():
 async def admin_history():
     """Return history of agent runs."""
     return {"runs": run_history.get_runs()}
+
+
+# --- AI Market Commentary ---
+
+_commentary_client = None
+
+
+def _get_commentary_client():
+    global _commentary_client
+    if _commentary_client is None and ANTHROPIC_API_KEY:
+        import anthropic
+        _commentary_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+    return _commentary_client
+
+
+@app.post("/market/commentary")
+async def market_commentary():
+    """Generate brief AI market commentary based on current stock prices."""
+    # Fetch current prices
+    try:
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+            response = await client.get(f"{TRADING_SERVICE_URL}/market/prices")
+            price_data = response.json()
+    except Exception as e:
+        return JSONResponse(
+            status_code=502,
+            content={"error": f"Failed to fetch prices for commentary: {str(e)}"},
+        )
+
+    quotes = price_data.get("quotes", [])
+    if not quotes:
+        return {"commentary": "Waiting for market data...", "timestamp": datetime.now(timezone.utc).isoformat()}
+
+    # Check if in incident state
+    is_incident = demo_state.state.value not in ("idle", "monitoring", "resolved")
+
+    price_summary = ", ".join(
+        f"{q['symbol']}: ${q['price']} ({'+' if q['change'] >= 0 else ''}{q['change']:.2f}, {'+' if q['changePercent'] >= 0 else ''}{q['changePercent']:.1f}%)"
+        for q in quotes
+    )
+
+    incident_context = ""
+    if is_incident:
+        incident_context = "\nCRITICAL: The trading platform is currently experiencing a latency incident. Price feeds are delayed. Emphasize the URGENCY and RISK of trading with stale data. Be alarming but professional."
+
+    prompt = f"""You are a trading floor AI analyst. Give a brief, punchy market commentary (2-3 sentences max) based on current prices.
+Be specific about individual stocks. Sound like a Bloomberg terminal alert — concise, data-driven, actionable.{incident_context}
+
+Current prices: {price_summary}"""
+
+    try:
+        api_client = _get_commentary_client()
+        if not api_client:
+            return {"commentary": "AI commentary unavailable — API key not configured.", "timestamp": datetime.now(timezone.utc).isoformat()}
+
+        loop = asyncio.get_event_loop()
+        message = await loop.run_in_executor(None, lambda: api_client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=150,
+            messages=[{"role": "user", "content": prompt}],
+        ))
+        commentary = message.content[0].text
+    except Exception as e:
+        commentary = f"Commentary temporarily unavailable."
+        logger.warning("AI commentary failed: %s", str(e))
+
+    return {
+        "commentary": commentary,
+        "isIncident": is_incident,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+# --- Market Data Proxy Endpoints ---
+
+@app.get("/market/prices")
+async def market_prices():
+    """Proxy live stock prices from the trading service."""
+    try:
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+            response = await client.get(f"{TRADING_SERVICE_URL}/market/prices")
+            return response.json()
+    except Exception as e:
+        return JSONResponse(
+            status_code=502,
+            content={"error": f"Failed to fetch market prices: {str(e)}"},
+        )
+
+
+@app.get("/market/activity")
+async def market_activity():
+    """Proxy trade activity from the trading service."""
+    try:
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+            response = await client.get(f"{TRADING_SERVICE_URL}/market/activity")
+            return response.json()
+    except Exception as e:
+        return JSONResponse(
+            status_code=502,
+            content={"error": f"Failed to fetch trade activity: {str(e)}"},
+        )
 
 
 @app.get("/health")

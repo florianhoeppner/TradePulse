@@ -2,12 +2,18 @@
 
 import { useState, useEffect } from "react";
 import { useAgentStream } from "@/lib/useAgentStream";
+import { useMarketData } from "@/lib/useMarketData";
 import { startAgent, approveAction, rejectAction } from "@/lib/api";
 import Navbar from "@/components/Navbar";
+import TickerBar from "@/components/TickerBar";
 import TimelineStep from "@/components/TimelineStep";
 import ApprovalCard from "@/components/ApprovalCard";
 import MetricsChart from "@/components/MetricsChart";
 import AgentThinking from "@/components/AgentThinking";
+import MarketPanel from "@/components/MarketPanel";
+import ActivityFeed from "@/components/ActivityFeed";
+import ImpactCounter from "@/components/ImpactCounter";
+import MarketCommentary from "@/components/MarketCommentary";
 
 export default function Dashboard() {
   const {
@@ -20,6 +26,8 @@ export default function Dashboard() {
     originalCode,
     optimizedCode,
   } = useAgentStream();
+
+  const { stocks, trades, isStale } = useMarketData();
 
   const [actionLoading, setActionLoading] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -79,9 +87,15 @@ export default function Dashboard() {
 
   const status = statusLabel[currentState] ?? statusLabel.idle;
 
+  const isIncident =
+    currentState !== "idle" &&
+    currentState !== "monitoring" &&
+    currentState !== "resolved";
+
   return (
     <div className="min-h-screen">
       <Navbar isConnected={isConnected} />
+      <TickerBar stocks={stocks} isStale={isStale} />
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
         {/* Header */}
@@ -175,8 +189,24 @@ export default function Dashboard() {
             )}
           </div>
 
-          {/* Right: Metrics */}
+          {/* Right: Market Data & Metrics */}
           <div className="space-y-4">
+            {/* Impact counter — only during incidents */}
+            <ImpactCounter
+              metrics={metrics}
+              isIncident={isIncident}
+            />
+
+            {/* AI Market Commentary */}
+            <MarketCommentary />
+
+            {/* Live Market Data */}
+            <MarketPanel stocks={stocks} isStale={isStale} />
+
+            {/* Trading Activity Feed */}
+            <ActivityFeed trades={trades} />
+
+            {/* p99 Latency Chart */}
             <MetricsChart dataPoints={metrics} />
 
             {/* Status card */}
@@ -199,23 +229,6 @@ export default function Dashboard() {
                   <span className="text-gray-500">Events</span>
                   <span className="text-gray-300">{consoleLog.length}</span>
                 </div>
-              </div>
-            </div>
-
-            {/* Watched symbols */}
-            <div className="bg-navy-800/50 border border-navy-700 rounded-lg p-4">
-              <h4 className="text-sm font-medium text-gray-400 mb-3">
-                Monitored Symbols
-              </h4>
-              <div className="flex flex-wrap gap-2">
-                {["AAPL", "MSFT", "GOOGL", "JPM", "GS"].map((sym) => (
-                  <span
-                    key={sym}
-                    className="text-xs font-mono px-2 py-1 bg-navy-700 rounded text-gray-300"
-                  >
-                    {sym}
-                  </span>
-                ))}
               </div>
             </div>
           </div>
