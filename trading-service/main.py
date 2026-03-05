@@ -83,46 +83,56 @@ background_task = None
 
 
 async def simulate_orders():
-    """Background task: execute simulated orders every 2 seconds to generate metrics."""
+    """Background task: seed prices on startup, then execute simulated orders to generate metrics."""
     global order_count, error_count
-    while True:
-        symbol = random.choice(SUPPORTED_SYMBOLS)
-        side = random.choice(["BUY", "SELL"])
-        quantity = random.choice([50, 100, 200, 500, 1000])
+
+    # Seed all symbols on startup so market data is available immediately
+    loop = asyncio.get_event_loop()
+    for symbol in SUPPORTED_SYMBOLS:
         try:
-            start = time.monotonic()
-            loop = asyncio.get_event_loop()
-            price = await loop.run_in_executor(None, pricing_client.get_price, symbol)
-            elapsed = time.monotonic() - start
+            await loop.run_in_executor(None, pricing_client.get_price, symbol)
+        except Exception:
+            pass  # Non-fatal — will be populated on next cycle
 
-            ORDER_LATENCY.observe(elapsed)
-            ORDERS_TOTAL.labels(symbol=symbol, status="success").inc()
-            latency_samples.append(elapsed * 1000)  # store in ms
-            order_count += 1
+    while True:
+        # Process 2 symbols per cycle for a more active trading floor feel
+        for _ in range(2):
+            symbol = random.choice(SUPPORTED_SYMBOLS)
+            side = random.choice(["BUY", "SELL"])
+            quantity = random.choice([50, 100, 200, 500, 1000])
+            try:
+                start = time.monotonic()
+                price = await loop.run_in_executor(None, pricing_client.get_price, symbol)
+                elapsed = time.monotonic() - start
 
-            trade_activity.append(TradeEntry(
-                symbol=symbol, side=side, quantity=quantity, price=price,
-                latency_ms=round(elapsed * 1000, 1),
-                timestamp=datetime.now(timezone.utc).isoformat(),
-                status="filled",
-            ))
-        except Exception as e:
-            elapsed = time.monotonic() - start
-            ORDER_LATENCY.observe(elapsed)
-            ORDERS_TOTAL.labels(symbol=symbol, status="error").inc()
-            PRICING_ERRORS.labels(symbol=symbol, error_type=type(e).__name__).inc()
-            latency_samples.append(elapsed * 1000)
-            order_count += 1
-            error_count += 1
+                ORDER_LATENCY.observe(elapsed)
+                ORDERS_TOTAL.labels(symbol=symbol, status="success").inc()
+                latency_samples.append(elapsed * 1000)  # store in ms
+                order_count += 1
 
-            trade_activity.append(TradeEntry(
-                symbol=symbol, side=side, quantity=quantity, price=None,
-                latency_ms=round(elapsed * 1000, 1),
-                timestamp=datetime.now(timezone.utc).isoformat(),
-                status="error",
-            ))
+                trade_activity.append(TradeEntry(
+                    symbol=symbol, side=side, quantity=quantity, price=price,
+                    latency_ms=round(elapsed * 1000, 1),
+                    timestamp=datetime.now(timezone.utc).isoformat(),
+                    status="filled",
+                ))
+            except Exception as e:
+                elapsed = time.monotonic() - start
+                ORDER_LATENCY.observe(elapsed)
+                ORDERS_TOTAL.labels(symbol=symbol, status="error").inc()
+                PRICING_ERRORS.labels(symbol=symbol, error_type=type(e).__name__).inc()
+                latency_samples.append(elapsed * 1000)
+                order_count += 1
+                error_count += 1
 
-        await asyncio.sleep(2)
+                trade_activity.append(TradeEntry(
+                    symbol=symbol, side=side, quantity=quantity, price=None,
+                    latency_ms=round(elapsed * 1000, 1),
+                    timestamp=datetime.now(timezone.utc).isoformat(),
+                    status="error",
+                ))
+
+        await asyncio.sleep(1)
 
 
 @asynccontextmanager
