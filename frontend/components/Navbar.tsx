@@ -8,6 +8,7 @@ interface NavbarProps {
 }
 
 const navLinks = [
+  { href: "/trader-desk", label: "Trader Desk" },
   { href: "/", label: "Dashboard" },
   { href: "/console", label: "Console" },
   { href: "/admin", label: "Admin" },
