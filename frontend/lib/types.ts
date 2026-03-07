@@ -74,3 +74,10 @@ export interface TradeActivity {
   timestamp: string;
   status: "filled" | "error";
 }
+
+export interface MarketStatus {
+  is_open: boolean;
+  exchange: string;
+  next_open_utc: string;
+  current_time_et: string;
+}
