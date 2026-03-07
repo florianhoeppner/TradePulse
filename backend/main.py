@@ -397,6 +397,20 @@ async def market_activity():
         )
 
 
+@app.get("/market/status")
+async def market_status():
+    """Proxy market status from the trading service."""
+    try:
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+            response = await client.get(f"{TRADING_SERVICE_URL}/market/status")
+            return response.json()
+    except Exception as e:
+        return JSONResponse(
+            status_code=502,
+            content={"error": f"Failed to fetch market status: {str(e)}"},
+        )
+
+
 @app.get("/health")
 async def health():
     return {

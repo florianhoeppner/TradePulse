@@ -10,9 +10,41 @@ upstream Yahoo Finance API will cascade directly to the caller.
 import collections
 import time
 import random
-from datetime import datetime, timezone
+from datetime import datetime, date, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import yfinance as yf
+
+ET = ZoneInfo("America/New_York")
+
+# NYSE market holidays for 2025-2026 (dates when the market is fully closed)
+_NYSE_HOLIDAYS: set[date] = {
+    # 2025
+    date(2025, 1, 1),    # New Year's Day
+    date(2025, 1, 20),   # MLK Day
+    date(2025, 2, 17),   # Presidents' Day
+    date(2025, 4, 18),   # Good Friday
+    date(2025, 5, 26),   # Memorial Day
+    date(2025, 6, 19),   # Juneteenth
+    date(2025, 7, 4),    # Independence Day
+    date(2025, 9, 1),    # Labor Day
+    date(2025, 11, 27),  # Thanksgiving
+    date(2025, 12, 25),  # Christmas
+    # 2026
+    date(2026, 1, 1),    # New Year's Day
+    date(2026, 1, 19),   # MLK Day
+    date(2026, 2, 16),   # Presidents' Day
+    date(2026, 4, 3),    # Good Friday
+    date(2026, 5, 25),   # Memorial Day
+    date(2026, 6, 19),   # Juneteenth
+    date(2026, 7, 3),    # Independence Day (observed)
+    date(2026, 9, 7),    # Labor Day
+    date(2026, 11, 26),  # Thanksgiving
+    date(2026, 12, 25),  # Christmas
+}
+
+MARKET_OPEN_HOUR, MARKET_OPEN_MIN = 9, 30
+MARKET_CLOSE_HOUR, MARKET_CLOSE_MIN = 16, 0
 
 
 # Supported symbols for the trading demo
@@ -38,6 +70,11 @@ class PriceSnapshot:
         self.timestamp = timestamp
 
 
+def _is_trading_day(d: date) -> bool:
+    """Check if a date is a NYSE trading day (weekday, not a holiday)."""
+    return d.weekday() < 5 and d not in _NYSE_HOLIDAYS
+
+
 class PricingClient:
     """Fetches live market prices. No resiliency patterns implemented."""
 
@@ -49,12 +86,48 @@ class PricingClient:
             for sym in SUPPORTED_SYMBOLS
         }
 
+    @staticmethod
+    def is_market_open() -> bool:
+        """Check if NYSE is currently in regular trading hours."""
+        now_et = datetime.now(ET)
+        if not _is_trading_day(now_et.date()):
+            return False
+        market_open = now_et.replace(hour=MARKET_OPEN_HOUR, minute=MARKET_OPEN_MIN, second=0, microsecond=0)
+        market_close = now_et.replace(hour=MARKET_CLOSE_HOUR, minute=MARKET_CLOSE_MIN, second=0, microsecond=0)
+        return market_open <= now_et < market_close
+
+    @staticmethod
+    def next_market_open() -> datetime:
+        """Return the next NYSE market open as a UTC datetime."""
+        now_et = datetime.now(ET)
+        candidate = now_et.replace(hour=MARKET_OPEN_HOUR, minute=MARKET_OPEN_MIN, second=0, microsecond=0)
+        # If market hasn't opened yet today and today is a trading day, it's today
+        if _is_trading_day(now_et.date()) and now_et < candidate:
+            return candidate.astimezone(timezone.utc)
+        # Otherwise, advance to next trading day
+        candidate += timedelta(days=1)
+        while not _is_trading_day(candidate.date()):
+            candidate += timedelta(days=1)
+        candidate = candidate.replace(hour=MARKET_OPEN_HOUR, minute=MARKET_OPEN_MIN, second=0, microsecond=0)
+        return candidate.astimezone(timezone.utc)
+
+    def get_market_status(self) -> dict:
+        """Return current market open/closed status with countdown info."""
+        now_et = datetime.now(ET)
+        return {
+            "is_open": self.is_market_open(),
+            "exchange": "NYSE",
+            "next_open_utc": self.next_market_open().isoformat(),
+            "current_time_et": now_et.strftime("%I:%M %p ET"),
+        }
+
     def get_price(self, symbol: str) -> float:
         """
         Get the current market price for a symbol.
 
         Makes a direct call to Yahoo Finance with no retry,
         no timeout, and no circuit breaker protection.
+        Falls back to previousClose when lastPrice is unavailable.
         """
         if symbol not in SUPPORTED_SYMBOLS:
             raise ValueError(f"Unsupported symbol: {symbol}")
@@ -66,7 +139,11 @@ class PricingClient:
 
         ticker = yf.Ticker(symbol)
         data = ticker.fast_info
-        price = data["lastPrice"]
+        try:
+            price = data["lastPrice"]
+        except (KeyError, Exception):
+            # Fallback to previous close when live price unavailable
+            price = data["previousClose"]
         price = round(price, 2)
 
         # Record price snapshot

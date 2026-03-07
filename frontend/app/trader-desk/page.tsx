@@ -1,11 +1,12 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { useAgentStream } from "@/lib/useAgentStream";
 import { useMarketData } from "@/lib/useMarketData";
+import { fetchMarketStatus } from "@/lib/api";
 import Navbar from "@/components/Navbar";
 import TickerBar from "@/components/TickerBar";
-import type { StockQuote, TradeActivity } from "@/lib/types";
+import type { StockQuote, TradeActivity, MarketStatus } from "@/lib/types";
 
 // ---------- helpers ----------
 
@@ -65,6 +66,56 @@ function ConnectionBanner({
           DATA STALE &mdash; Last update {secondsAgo}s ago
         </span>
       )}
+    </div>
+  );
+}
+
+function MarketClosedBanner({
+  marketStatus,
+}: {
+  marketStatus: MarketStatus | null;
+}) {
+  const [now, setNow] = useState(Date.now());
+
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  if (!marketStatus || marketStatus.is_open) return null;
+
+  const nextOpen = new Date(marketStatus.next_open_utc).getTime();
+  const diff = Math.max(0, nextOpen - now);
+  const hours = Math.floor(diff / 3600000);
+  const minutes = Math.floor((diff % 3600000) / 60000);
+  const seconds = Math.floor((diff % 60000) / 1000);
+
+  const countdown =
+    hours > 0
+      ? `${hours}h ${minutes}m ${seconds}s`
+      : minutes > 0
+        ? `${minutes}m ${seconds}s`
+        : `${seconds}s`;
+
+  return (
+    <div className="bg-accent-amber/10 border-b border-accent-amber/30 px-4 py-2 flex items-center justify-between">
+      <div className="flex items-center gap-3">
+        <span className="w-2 h-2 rounded-full bg-accent-amber" />
+        <span className="text-sm font-bold text-accent-amber tracking-wide">
+          {marketStatus.exchange} &mdash; Market Closed
+        </span>
+        <span className="text-xs text-gray-400">
+          Displaying last close prices
+        </span>
+      </div>
+      <div className="flex items-center gap-4">
+        <span className="text-sm font-mono text-accent-amber">
+          Opens in {countdown}
+        </span>
+        <span className="text-xs text-gray-500 font-mono">
+          {marketStatus.current_time_et}
+        </span>
+      </div>
     </div>
   );
 }
@@ -789,6 +840,7 @@ export default function TraderDesk() {
   const { stocks, trades, lastFetchTime, isStale } = useMarketData();
 
   const [selectedSymbol, setSelectedSymbol] = useState<string>("");
+  const [marketStatus, setMarketStatus] = useState<MarketStatus | null>(null);
 
   // Default to first stock when loaded
   useEffect(() => {
@@ -797,12 +849,27 @@ export default function TraderDesk() {
     }
   }, [stocks, selectedSymbol]);
 
+  // Poll market status every 30 seconds
+  const pollMarketStatus = useCallback(async () => {
+    const res = await fetchMarketStatus();
+    if (res.ok && res.data) {
+      setMarketStatus(res.data as MarketStatus);
+    }
+  }, []);
+
+  useEffect(() => {
+    pollMarketStatus();
+    const t = setInterval(pollMarketStatus, 30000);
+    return () => clearInterval(t);
+  }, [pollMarketStatus]);
+
   const selectedStock = stocks.find((s) => s.symbol === selectedSymbol);
 
   return (
     <div className="min-h-screen bg-navy-950">
       <Navbar isConnected={isConnected} />
       <TickerBar stocks={stocks} isStale={isStale} />
+      <MarketClosedBanner marketStatus={marketStatus} />
       <ConnectionBanner
         isConnected={isConnected}
         isStale={isStale}
@@ -828,12 +895,18 @@ export default function TraderDesk() {
             </span>
             <span
               className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
-                isConnected && !isStale
-                  ? "bg-accent-green/20 text-accent-green"
-                  : "bg-accent-red/20 text-accent-red animate-pulse"
+                !isConnected || isStale
+                  ? "bg-accent-red/20 text-accent-red animate-pulse"
+                  : marketStatus && !marketStatus.is_open
+                    ? "bg-accent-amber/20 text-accent-amber"
+                    : "bg-accent-green/20 text-accent-green"
               }`}
             >
-              {isConnected && !isStale ? "LIVE" : "DEGRADED"}
+              {!isConnected || isStale
+                ? "DEGRADED"
+                : marketStatus && !marketStatus.is_open
+                  ? "CLOSED"
+                  : "LIVE"}
             </span>
           </div>
         </div>

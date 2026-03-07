@@ -255,6 +255,12 @@ async def chaos_status():
     return {"chaos_mode": pricing_client.chaos_mode}
 
 
+@app.get("/market/status")
+async def market_status():
+    """Return whether the NYSE market is currently open and when it next opens."""
+    return pricing_client.get_market_status()
+
+
 @app.get("/metrics/summary")
 async def metrics_summary():
     """Return computed p99 latency and order counts directly — no Prometheus needed."""

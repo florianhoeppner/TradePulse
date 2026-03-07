@@ -77,4 +77,8 @@ export function fetchMarketCommentary() {
   return apiCall("/market/commentary", { method: "POST" });
 }
 
+export function fetchMarketStatus() {
+  return apiCall("/market/status");
+}
+
 export { BACKEND_URL };
