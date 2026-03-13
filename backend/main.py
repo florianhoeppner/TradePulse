@@ -21,16 +21,13 @@ from fastapi.responses import JSONResponse
 from sse_starlette.sse import EventSourceResponse
 
 from state import AgentState, DemoState, RunHistory
-from agent import (
-    run_agent,
-    PAGERDUTY_ROUTING_KEY,
-    ANTHROPIC_API_KEY,
-    HTTP_TIMEOUT,
-)
 
 # --- Configuration ---
 
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+PAGERDUTY_ROUTING_KEY = os.environ.get("PAGERDUTY_ROUTING_KEY", "")
 TRADING_SERVICE_URL = os.environ.get("TRADING_SERVICE_URL", "http://trading-service:8001")
+HTTP_TIMEOUT = 10.0
 
 ENV_VAR_NAMES = [
     "ANTHROPIC_API_KEY",
@@ -78,7 +75,23 @@ async def lifespan(app: FastAPI):
     global broadcast_task
     port = os.environ.get("PORT", "8000")
     logger.info("TradePulse backend starting on port %s", port)
+
+    # Diagnostic: check if anthropic SDK is available
+    try:
+        import anthropic
+        logger.info("anthropic SDK version: %s", anthropic.__version__)
+    except Exception as e:
+        logger.warning("anthropic SDK not available: %s", e)
+
+    # Diagnostic: check env var configuration
+    configured = [v for v in ENV_VAR_NAMES if os.environ.get(v)]
+    missing = [v for v in ENV_VAR_NAMES if not os.environ.get(v)]
+    logger.info("Configured env vars: %s", configured)
+    if missing:
+        logger.warning("Missing env vars: %s", missing)
+
     broadcast_task = asyncio.create_task(broadcast_events())
+    logger.info("TradePulse backend ready — health check at /health")
     yield
     broadcast_task.cancel()
     try:
@@ -159,6 +172,15 @@ async def events():
 async def start_agent():
     """Start the AI agent run."""
     global agent_task
+
+    try:
+        from agent import run_agent
+    except Exception as e:
+        logger.error("Failed to import agent module: %s", e)
+        return JSONResponse(
+            status_code=503,
+            content={"error": f"Agent module unavailable: {e}"},
+        )
 
     if demo_state.state != AgentState.IDLE:
         return {"error": "Agent is already running", "state": demo_state.state.value}

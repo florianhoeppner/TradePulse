@@ -12,7 +12,6 @@ import time
 from datetime import datetime, timezone
 from typing import Any
 
-import anthropic
 import httpx
 
 from state import AgentState, DemoState
@@ -703,6 +702,7 @@ async def run_agent(
     approval_event: asyncio.Event,
 ) -> dict[str, Any]:
     """Run the full agentic loop. Emits events to the queue for SSE streaming."""
+    import anthropic
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
     start_time = time.monotonic()
 
