@@ -263,6 +263,25 @@ async def admin_reset():
     except Exception as e:
         errors.append(f"Chaos disable failed: {str(e)}")
 
+    # Deactivate short-term response controls
+    try:
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+            await client.post(f"{TRADING_SERVICE_URL}/admin/cache/deactivate")
+    except Exception as e:
+        errors.append(f"Cache deactivate failed: {str(e)}")
+
+    try:
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+            await client.post(f"{TRADING_SERVICE_URL}/admin/load-shedding/deactivate")
+    except Exception as e:
+        errors.append(f"Load shedding deactivate failed: {str(e)}")
+
+    try:
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+            await client.post(f"{TRADING_SERVICE_URL}/admin/pricing-source/primary")
+    except Exception as e:
+        errors.append(f"Pricing source reset failed: {str(e)}")
+
     # Reset state
     demo_state.reset()
     approval_event.clear()
@@ -310,6 +329,81 @@ async def admin_chaos_status():
         return JSONResponse(
             status_code=502,
             content={"error": f"Failed to fetch chaos status: {str(e)}"},
+        )
+
+
+@app.get("/admin/platform-status")
+async def admin_platform_status():
+    """Proxy platform status from the trading service."""
+    try:
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+            response = await client.get(f"{TRADING_SERVICE_URL}/admin/platform-status")
+            return response.json()
+    except Exception as e:
+        return JSONResponse(
+            status_code=502,
+            content={"error": f"Failed to fetch platform status: {str(e)}"},
+        )
+
+
+@app.post("/admin/cache/{mode}")
+async def admin_cache(mode: str):
+    """Toggle price cache on the trading service."""
+    if mode not in ("activate", "deactivate"):
+        return JSONResponse(
+            status_code=422,
+            content={"error": "Mode must be 'activate' or 'deactivate'"},
+        )
+    try:
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+            response = await client.post(f"{TRADING_SERVICE_URL}/admin/cache/{mode}")
+            return response.json()
+    except Exception as e:
+        return JSONResponse(
+            status_code=502,
+            content={"error": f"Failed to toggle cache: {str(e)}"},
+        )
+
+
+@app.post("/admin/load-shedding/{mode}")
+async def admin_load_shedding(mode: str):
+    """Toggle load shedding on the trading service."""
+    if mode not in ("activate", "deactivate"):
+        return JSONResponse(
+            status_code=422,
+            content={"error": "Mode must be 'activate' or 'deactivate'"},
+        )
+    try:
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+            response = await client.post(
+                f"{TRADING_SERVICE_URL}/admin/load-shedding/{mode}"
+            )
+            return response.json()
+    except Exception as e:
+        return JSONResponse(
+            status_code=502,
+            content={"error": f"Failed to toggle load shedding: {str(e)}"},
+        )
+
+
+@app.post("/admin/pricing-source/{mode}")
+async def admin_pricing_source(mode: str):
+    """Switch pricing source on the trading service."""
+    if mode not in ("backup", "primary"):
+        return JSONResponse(
+            status_code=422,
+            content={"error": "Mode must be 'backup' or 'primary'"},
+        )
+    try:
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+            response = await client.post(
+                f"{TRADING_SERVICE_URL}/admin/pricing-source/{mode}"
+            )
+            return response.json()
+    except Exception as e:
+        return JSONResponse(
+            status_code=502,
+            content={"error": f"Failed to switch pricing source: {str(e)}"},
         )
 
 

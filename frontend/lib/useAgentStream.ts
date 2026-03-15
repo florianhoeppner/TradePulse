@@ -9,6 +9,12 @@ import type {
   MetricsDataPoint,
 } from "./types";
 
+const SHORT_TERM_STATES = new Set([
+  "cache_activated",
+  "load_shedding_enabled",
+  "backup_pricing_active",
+]);
+
 const STEP_DEFINITIONS: Record<string, { title: string; subtitle: string }> = {
   monitoring: {
     title: "Monitoring",
@@ -17,6 +23,18 @@ const STEP_DEFINITIONS: Record<string, { title: string; subtitle: string }> = {
   anomaly_detected: {
     title: "Anomaly Detected",
     subtitle: "p99 latency threshold breached",
+  },
+  cache_activated: {
+    title: "Price Cache Activated",
+    subtitle: "Serving cached prices to reduce latency",
+  },
+  load_shedding_enabled: {
+    title: "Load Shedding Enabled",
+    subtitle: "Limiting concurrent pricing requests",
+  },
+  backup_pricing_active: {
+    title: "Backup Pricing Active",
+    subtitle: "Switched to reliable backup data source",
   },
   incident_created: {
     title: "PagerDuty",
@@ -137,6 +155,9 @@ export function useAgentStream() {
             subtitle: def.subtitle,
             data: extraData,
             timestamp: new Date().toISOString(),
+            track: SHORT_TERM_STATES.has(state)
+              ? ("short-term" as const)
+              : ("long-term" as const),
           },
         ];
       });

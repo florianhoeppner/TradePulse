@@ -85,4 +85,26 @@ export function fetchMarketStatus() {
   return apiCall("/market/status");
 }
 
+export function fetchPlatformStatus() {
+  return apiCall("/admin/platform-status");
+}
+
+export function toggleCache(activate: boolean) {
+  return apiCall(`/admin/cache/${activate ? "activate" : "deactivate"}`, {
+    method: "POST",
+  });
+}
+
+export function toggleLoadShedding(activate: boolean) {
+  return apiCall(`/admin/load-shedding/${activate ? "activate" : "deactivate"}`, {
+    method: "POST",
+  });
+}
+
+export function switchPricingSource(backup: boolean) {
+  return apiCall(`/admin/pricing-source/${backup ? "backup" : "primary"}`, {
+    method: "POST",
+  });
+}
+
 export { BACKEND_URL };

@@ -182,6 +182,47 @@ TOOLS = [
             "required": ["dedup_key", "resolution_summary"],
         },
     },
+    # --- Short-Term Response Tools ---
+    {
+        "name": "activate_price_cache",
+        "description": (
+            "Activate the price cache on the trading service to serve last-known-good "
+            "cached prices instead of making live API calls. This provides immediate "
+            "latency relief — no deploy needed. Prices may be seconds stale but orders "
+            "will flow normally."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    },
+    {
+        "name": "enable_load_shedding",
+        "description": (
+            "Enable load shedding on the trading service to limit concurrent pricing "
+            "requests to 3. Excess requests are queued briefly then served from cache. "
+            "This prevents a degraded pricing service from being overwhelmed."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    },
+    {
+        "name": "switch_to_backup_pricing",
+        "description": (
+            "Switch the trading service from the primary Yahoo Finance pricing method "
+            "(fast_info, which can be slow under load) to the backup method (bulk download, "
+            "more reliable under load). This is a config change, not a code change."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    },
 ]
 
 # --- Tool Implementations ---
@@ -630,6 +671,72 @@ async def tool_resolve_pagerduty_incident(dedup_key: str, resolution_summary: st
     return results
 
 
+# --- Short-Term Response Tool Implementations ---
+
+
+async def tool_activate_price_cache() -> dict[str, Any]:
+    """Activate price cache on the trading service for immediate latency relief."""
+    try:
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+            response = await client.post(f"{TRADING_SERVICE_URL}/admin/cache/activate")
+            response.raise_for_status()
+            data = response.json()
+            return {
+                **data,
+                "reasoning": (
+                    "The pricing service is degraded. Activating the price cache to serve "
+                    "last-known-good prices. Prices may be seconds old but orders will flow "
+                    "without upstream latency penalty."
+                ),
+                "impact": "Order latency reduced to sub-200ms by serving cached prices.",
+            }
+    except Exception as e:
+        return {"error": f"Failed to activate price cache: {str(e)}"}
+
+
+async def tool_enable_load_shedding() -> dict[str, Any]:
+    """Enable load shedding to limit concurrent pricing requests."""
+    try:
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+            response = await client.post(
+                f"{TRADING_SERVICE_URL}/admin/load-shedding/activate"
+            )
+            response.raise_for_status()
+            data = response.json()
+            return {
+                **data,
+                "reasoning": (
+                    "The pricing service is struggling. Throwing more requests at it will "
+                    "make things worse. Limiting concurrent calls to 3 to let it recover."
+                ),
+                "impact": "Concurrent pricing requests capped at 3. Excess requests served from cache.",
+            }
+    except Exception as e:
+        return {"error": f"Failed to enable load shedding: {str(e)}"}
+
+
+async def tool_switch_to_backup_pricing() -> dict[str, Any]:
+    """Switch to backup pricing source for more reliable data under load."""
+    try:
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+            response = await client.post(
+                f"{TRADING_SERVICE_URL}/admin/pricing-source/backup"
+            )
+            response.raise_for_status()
+            data = response.json()
+            return {
+                **data,
+                "reasoning": (
+                    "The primary pricing method (fast_info) is timing out under load. "
+                    "Yahoo Finance has a more reliable bulk download method. Switching "
+                    "now — this is a config change, not a code change."
+                ),
+                "impact": "Pricing source switched to backup. More reliable data delivery under load.",
+            }
+    except Exception as e:
+        return {"error": f"Failed to switch to backup pricing: {str(e)}"}
+
+
 # --- Tool Dispatcher ---
 
 TOOL_MAP = {
@@ -659,11 +766,20 @@ TOOL_MAP = {
         dedup_key=args["dedup_key"],
         resolution_summary=args["resolution_summary"],
     ),
+    # Short-term response tools
+    "activate_price_cache": lambda args: tool_activate_price_cache(),
+    "enable_load_shedding": lambda args: tool_enable_load_shedding(),
+    "switch_to_backup_pricing": lambda args: tool_switch_to_backup_pricing(),
 }
 
 # State mapping: which tool triggers which state transition
 TOOL_STATE_MAP = {
     "detect_latency_anomaly": AgentState.ANOMALY_DETECTED,
+    # Short-term response states
+    "activate_price_cache": AgentState.CACHE_ACTIVATED,
+    "enable_load_shedding": AgentState.LOAD_SHEDDING_ENABLED,
+    "switch_to_backup_pricing": AgentState.BACKUP_PRICING_ACTIVE,
+    # Long-term response states
     "create_pagerduty_incident": AgentState.INCIDENT_CREATED,
     "investigate_github_source": AgentState.INVESTIGATING,
     "identify_missing_patterns": AgentState.ANALYZING,
@@ -677,19 +793,35 @@ TOOL_STATE_MAP = {
 
 SYSTEM_PROMPT = """You are an AI Site Reliability Engineer (SRE) agent monitoring the TradePulse trading platform.
 
-Your mission: Detect latency anomalies, investigate root causes, and orchestrate incident response.
+Your mission: Detect latency anomalies, stabilize the platform immediately, then investigate root causes and orchestrate a long-term fix.
+
+When production breaks, you operate on TWO TRACKS simultaneously:
+- SHORT-TERM: Stop the bleeding NOW (you act autonomously)
+- LONG-TERM: Fix it properly LATER (human decides)
 
 Follow this exact sequence when you detect an issue:
-1. Use detect_latency_anomaly to check current p99 latency
-2. If latency breaches the 2000ms threshold, use create_pagerduty_incident to escalate
-3. Use investigate_github_source to retrieve the trading-service/pricing_client.py source code
-4. Use identify_missing_patterns to analyze the code for missing resiliency patterns
-5. Use generate_optimized_code to produce an improved version with retry, circuit breaker, and timeout
-6. Use create_jira_ticket to document the incident, analysis, and proposed fix
-7. STOP and wait — a human must approve before you proceed
-8. After approval, use resolve_pagerduty_incident to close the incident
 
-Be thorough in your reasoning. Explain what you're doing and why at each step.
+1. Use detect_latency_anomaly to check current p99 latency
+
+── SHORT-TERM TRACK (act immediately, no human approval needed) ──
+
+2. Use activate_price_cache to serve cached prices for immediate latency relief
+3. Use enable_load_shedding to limit concurrent pricing requests and prevent cascading failure
+4. Use switch_to_backup_pricing to switch to the more reliable backup data source
+
+After all three: announce "Platform stabilized. Now investigating root cause."
+
+── LONG-TERM TRACK (human-in-the-loop) ──
+
+5. Use create_pagerduty_incident to formally escalate (severity: "critical")
+6. Use investigate_github_source to retrieve trading-service/pricing_client.py
+7. Use identify_missing_patterns to analyze for missing resiliency patterns
+8. Use generate_optimized_code to produce an improved version with retry, circuit breaker, and timeout
+9. Use create_jira_ticket to document the incident, analysis, and proposed fix
+10. STOP and wait — a human must approve before you proceed
+11. After approval, use resolve_pagerduty_incident to close the incident
+
+Be thorough in your reasoning. Before each action, explain WHAT you are doing and WHY.
 When creating the PagerDuty incident, set severity to "critical" for latency breaches.
 When creating the Jira ticket, include the full incident context and the complete optimized code."""
 

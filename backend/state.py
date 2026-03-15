@@ -12,6 +12,11 @@ class AgentState(str, Enum):
     IDLE = "idle"
     MONITORING = "monitoring"
     ANOMALY_DETECTED = "anomaly_detected"
+    # Short-term response states
+    CACHE_ACTIVATED = "cache_activated"
+    LOAD_SHEDDING_ENABLED = "load_shedding_enabled"
+    BACKUP_PRICING_ACTIVE = "backup_pricing_active"
+    # Long-term response states
     INCIDENT_CREATED = "incident_created"
     INVESTIGATING = "investigating"
     ANALYZING = "analyzing"
@@ -28,7 +33,10 @@ class AgentState(str, Enum):
 VALID_TRANSITIONS: dict[AgentState, set[AgentState]] = {
     AgentState.IDLE: {AgentState.MONITORING, AgentState.ERROR},
     AgentState.MONITORING: {AgentState.ANOMALY_DETECTED, AgentState.MONITORING, AgentState.ERROR},
-    AgentState.ANOMALY_DETECTED: {AgentState.INCIDENT_CREATED, AgentState.ERROR},
+    AgentState.ANOMALY_DETECTED: {AgentState.CACHE_ACTIVATED, AgentState.INCIDENT_CREATED, AgentState.ERROR},
+    AgentState.CACHE_ACTIVATED: {AgentState.LOAD_SHEDDING_ENABLED, AgentState.ERROR},
+    AgentState.LOAD_SHEDDING_ENABLED: {AgentState.BACKUP_PRICING_ACTIVE, AgentState.ERROR},
+    AgentState.BACKUP_PRICING_ACTIVE: {AgentState.INCIDENT_CREATED, AgentState.ERROR},
     AgentState.INCIDENT_CREATED: {AgentState.INVESTIGATING, AgentState.ERROR},
     AgentState.INVESTIGATING: {AgentState.ANALYZING, AgentState.ERROR},
     AgentState.ANALYZING: {AgentState.FIX_GENERATED, AgentState.ERROR},

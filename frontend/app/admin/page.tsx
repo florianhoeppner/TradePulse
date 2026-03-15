@@ -9,15 +9,20 @@ import {
   getChaosStatus,
   getConfig,
   getHistory,
+  fetchPlatformStatus,
+  toggleCache,
+  toggleLoadShedding,
+  switchPricingSource,
 } from "@/lib/api";
 import Navbar from "@/components/Navbar";
-import type { ConfigEntry, RunHistoryEntry } from "@/lib/types";
+import type { ConfigEntry, RunHistoryEntry, PlatformStatus } from "@/lib/types";
 
 export default function AdminPage() {
   const { isConnected, currentState, resetStream } = useAgentStreamContext();
   const [config, setConfig] = useState<Record<string, ConfigEntry>>({});
   const [history, setHistory] = useState<RunHistoryEntry[]>([]);
   const [chaosEnabled, setChaosEnabled] = useState(false);
+  const [platformStatus, setPlatformStatus] = useState<PlatformStatus | null>(null);
   const [confirmReset, setConfirmReset] = useState(false);
   const [loading, setLoading] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -32,10 +37,11 @@ export default function AdminPage() {
   const [configError, setConfigError] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
-    const [configRes, historyRes, chaosRes] = await Promise.all([
+    const [configRes, historyRes, chaosRes, platformRes] = await Promise.all([
       getConfig(),
       getHistory(),
       getChaosStatus(),
+      fetchPlatformStatus(),
     ]);
     if (chaosRes.ok && chaosRes.data) {
       setChaosEnabled((chaosRes.data as { chaos_mode: boolean }).chaos_mode);
@@ -52,6 +58,9 @@ export default function AdminPage() {
       setHistory(
         (historyRes.data as { runs: RunHistoryEntry[] }).runs
       );
+    }
+    if (platformRes.ok && platformRes.data) {
+      setPlatformStatus(platformRes.data as PlatformStatus);
     }
   }, []);
 
@@ -100,6 +109,42 @@ export default function AdminPage() {
     }
   };
 
+  const handleCacheToggle = async () => {
+    setLoading("cache");
+    setActionError(null);
+    const newState = !(platformStatus?.cache.active ?? false);
+    const res = await toggleCache(newState);
+    setLoading(null);
+    if (!res.ok) {
+      setActionError(res.error ?? "Failed to toggle cache");
+    }
+    await loadData();
+  };
+
+  const handleLoadSheddingToggle = async () => {
+    setLoading("loadshed");
+    setActionError(null);
+    const newState = !(platformStatus?.load_shedding.active ?? false);
+    const res = await toggleLoadShedding(newState);
+    setLoading(null);
+    if (!res.ok) {
+      setActionError(res.error ?? "Failed to toggle load shedding");
+    }
+    await loadData();
+  };
+
+  const handlePricingSourceToggle = async () => {
+    setLoading("pricing");
+    setActionError(null);
+    const switchToBackup = platformStatus?.pricing_source !== "backup";
+    const res = await switchPricingSource(switchToBackup);
+    setLoading(null);
+    if (!res.ok) {
+      setActionError(res.error ?? "Failed to switch pricing source");
+    }
+    await loadData();
+  };
+
   return (
     <div className="min-h-screen">
       <Navbar isConnected={isConnected} />
@@ -126,6 +171,140 @@ export default function AdminPage() {
         )}
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {/* Platform State */}
+          <div className="bg-navy-800/50 border border-navy-700 rounded-lg p-5 md:col-span-2 lg:col-span-3">
+            <h3 className="text-sm font-semibold text-gray-300 mb-4 uppercase tracking-wider">
+              Platform State
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              {/* Price Cache */}
+              <div className="flex items-center justify-between bg-navy-900/50 rounded p-3">
+                <div>
+                  <span className="text-xs text-gray-400">Price Cache</span>
+                  <div className="flex items-center gap-2 mt-1">
+                    <span
+                      className={`text-xs font-mono px-1.5 py-0.5 rounded ${
+                        platformStatus?.cache.active
+                          ? "text-accent-green bg-accent-green/10"
+                          : "text-gray-500 bg-navy-700"
+                      }`}
+                    >
+                      {platformStatus?.cache.active ? "ACTIVE" : "OFF"}
+                    </span>
+                    {platformStatus?.cache.active && (
+                      <span className="text-xs text-gray-500">
+                        {Math.round(platformStatus.cache.age_seconds)}s
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <button
+                  onClick={handleCacheToggle}
+                  disabled={loading === "cache"}
+                  className="text-xs px-2 py-1 rounded border border-navy-600 text-gray-400 hover:text-white hover:border-navy-500 disabled:opacity-50"
+                >
+                  {loading === "cache"
+                    ? "..."
+                    : platformStatus?.cache.active
+                    ? "Deactivate"
+                    : "Activate"}
+                </button>
+              </div>
+
+              {/* Load Shedding */}
+              <div className="flex items-center justify-between bg-navy-900/50 rounded p-3">
+                <div>
+                  <span className="text-xs text-gray-400">Load Shedding</span>
+                  <div className="flex items-center gap-2 mt-1">
+                    <span
+                      className={`text-xs font-mono px-1.5 py-0.5 rounded ${
+                        platformStatus?.load_shedding.active
+                          ? "text-accent-green bg-accent-green/10"
+                          : "text-gray-500 bg-navy-700"
+                      }`}
+                    >
+                      {platformStatus?.load_shedding.active ? "ACTIVE" : "OFF"}
+                    </span>
+                    {platformStatus?.load_shedding.active && (
+                      <span className="text-xs text-gray-500">
+                        shed: {platformStatus.load_shedding.shed_count}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <button
+                  onClick={handleLoadSheddingToggle}
+                  disabled={loading === "loadshed"}
+                  className="text-xs px-2 py-1 rounded border border-navy-600 text-gray-400 hover:text-white hover:border-navy-500 disabled:opacity-50"
+                >
+                  {loading === "loadshed"
+                    ? "..."
+                    : platformStatus?.load_shedding.active
+                    ? "Deactivate"
+                    : "Activate"}
+                </button>
+              </div>
+
+              {/* Pricing Source */}
+              <div className="flex items-center justify-between bg-navy-900/50 rounded p-3">
+                <div>
+                  <span className="text-xs text-gray-400">Pricing Source</span>
+                  <div className="mt-1">
+                    <span
+                      className={`text-xs font-mono px-1.5 py-0.5 rounded ${
+                        platformStatus?.pricing_source === "backup"
+                          ? "text-accent-amber bg-accent-amber/10"
+                          : "text-gray-500 bg-navy-700"
+                      }`}
+                    >
+                      {(platformStatus?.pricing_source ?? "primary").toUpperCase()}
+                    </span>
+                  </div>
+                </div>
+                <button
+                  onClick={handlePricingSourceToggle}
+                  disabled={loading === "pricing"}
+                  className="text-xs px-2 py-1 rounded border border-navy-600 text-gray-400 hover:text-white hover:border-navy-500 disabled:opacity-50"
+                >
+                  {loading === "pricing"
+                    ? "..."
+                    : platformStatus?.pricing_source === "backup"
+                    ? "Primary"
+                    : "Backup"}
+                </button>
+              </div>
+
+              {/* Chaos Mode (moved here for grouping) */}
+              <div className="flex items-center justify-between bg-navy-900/50 rounded p-3">
+                <div>
+                  <span className="text-xs text-gray-400">Chaos Mode</span>
+                  <div className="mt-1">
+                    <span
+                      className={`text-xs font-mono px-1.5 py-0.5 rounded ${
+                        chaosEnabled
+                          ? "text-accent-red bg-accent-red/10"
+                          : "text-gray-500 bg-navy-700"
+                      }`}
+                    >
+                      {chaosEnabled ? "ON" : "OFF"}
+                    </span>
+                  </div>
+                </div>
+                <button
+                  onClick={handleChaosToggle}
+                  disabled={loading === "chaos"}
+                  className="text-xs px-2 py-1 rounded border border-navy-600 text-gray-400 hover:text-white hover:border-navy-500 disabled:opacity-50"
+                >
+                  {loading === "chaos"
+                    ? "..."
+                    : chaosEnabled
+                    ? "Disable"
+                    : "Enable"}
+                </button>
+              </div>
+            </div>
+          </div>
+
           {/* Controls */}
           <div className="bg-navy-800/50 border border-navy-700 rounded-lg p-5">
             <h3 className="text-sm font-semibold text-gray-300 mb-4 uppercase tracking-wider">

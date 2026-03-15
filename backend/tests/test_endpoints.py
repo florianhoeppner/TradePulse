@@ -61,6 +61,15 @@ class TestAdminReset:
         respx.post(f"{TRADING_BASE}/chaos/disable").mock(
             return_value=Response(200, json={"chaos_mode": False})
         )
+        respx.post(f"{TRADING_BASE}/admin/cache/deactivate").mock(
+            return_value=Response(200, json={"cache_active": False})
+        )
+        respx.post(f"{TRADING_BASE}/admin/load-shedding/deactivate").mock(
+            return_value=Response(200, json={"load_shedding_active": False})
+        )
+        respx.post(f"{TRADING_BASE}/admin/pricing-source/primary").mock(
+            return_value=Response(200, json={"pricing_source": "primary"})
+        )
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             response = await client.post("/admin/reset")
         assert response.status_code == 200
@@ -81,6 +90,15 @@ class TestAdminReset:
         respx.post(f"{TRADING_BASE}/chaos/disable").mock(
             return_value=Response(200, json={"chaos_mode": False})
         )
+        respx.post(f"{TRADING_BASE}/admin/cache/deactivate").mock(
+            return_value=Response(200, json={"cache_active": False})
+        )
+        respx.post(f"{TRADING_BASE}/admin/load-shedding/deactivate").mock(
+            return_value=Response(200, json={"load_shedding_active": False})
+        )
+        respx.post(f"{TRADING_BASE}/admin/pricing-source/primary").mock(
+            return_value=Response(200, json={"pricing_source": "primary"})
+        )
 
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             response = await client.post("/admin/reset")
@@ -98,6 +116,9 @@ class TestAdminReset:
             return_value=Response(500, json={"error": "internal"})
         )
         respx.post(f"{TRADING_BASE}/chaos/disable").mock(side_effect=Exception("connection refused"))
+        respx.post(f"{TRADING_BASE}/admin/cache/deactivate").mock(side_effect=Exception("connection refused"))
+        respx.post(f"{TRADING_BASE}/admin/load-shedding/deactivate").mock(side_effect=Exception("connection refused"))
+        respx.post(f"{TRADING_BASE}/admin/pricing-source/primary").mock(side_effect=Exception("connection refused"))
 
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             response = await client.post("/admin/reset")
@@ -272,3 +293,93 @@ class TestMarketCommentary:
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             response = await client.post("/market/commentary")
         assert response.status_code == 502
+
+
+# --- Short-Term Response Proxy Endpoints ---
+
+
+class TestPlatformStatusProxy:
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_returns_platform_status(self, transport):
+        respx.get(f"{TRADING_BASE}/admin/platform-status").mock(
+            return_value=Response(200, json={
+                "cache": {"active": False, "age_seconds": 0},
+                "load_shedding": {"active": False, "shed_count": 0, "queue_depth": 0},
+                "pricing_source": "primary",
+                "chaos_mode": False,
+            })
+        )
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.get("/admin/platform-status")
+        assert response.status_code == 200
+        data = response.json()
+        assert "cache" in data
+        assert "load_shedding" in data
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_trading_service_down(self, transport):
+        respx.get(f"{TRADING_BASE}/admin/platform-status").mock(
+            side_effect=Exception("connection refused")
+        )
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.get("/admin/platform-status")
+        assert response.status_code == 502
+
+
+class TestCacheProxy:
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_activate(self, transport):
+        respx.post(f"{TRADING_BASE}/admin/cache/activate").mock(
+            return_value=Response(200, json={"cache_active": True})
+        )
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.post("/admin/cache/activate")
+        assert response.status_code == 200
+        assert response.json()["cache_active"] is True
+
+    @pytest.mark.asyncio
+    async def test_invalid_mode(self, transport):
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.post("/admin/cache/invalid")
+        assert response.status_code == 422
+
+
+class TestLoadSheddingProxy:
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_activate(self, transport):
+        respx.post(f"{TRADING_BASE}/admin/load-shedding/activate").mock(
+            return_value=Response(200, json={"load_shedding_active": True})
+        )
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.post("/admin/load-shedding/activate")
+        assert response.status_code == 200
+        assert response.json()["load_shedding_active"] is True
+
+    @pytest.mark.asyncio
+    async def test_invalid_mode(self, transport):
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.post("/admin/load-shedding/invalid")
+        assert response.status_code == 422
+
+
+class TestPricingSourceProxy:
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_switch_to_backup(self, transport):
+        respx.post(f"{TRADING_BASE}/admin/pricing-source/backup").mock(
+            return_value=Response(200, json={"pricing_source": "backup"})
+        )
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.post("/admin/pricing-source/backup")
+        assert response.status_code == 200
+        assert response.json()["pricing_source"] == "backup"
+
+    @pytest.mark.asyncio
+    async def test_invalid_mode(self, transport):
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.post("/admin/pricing-source/invalid")
+        assert response.status_code == 422

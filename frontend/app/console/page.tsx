@@ -50,6 +50,29 @@ function ConsoleEntryRow({ entry }: { entry: ConsoleEntry }) {
         </span>
       </div>
 
+      {/* Reasoning and impact for short-term tools */}
+      {(() => {
+        const output = entry.data.output as Record<string, unknown> | undefined;
+        if (
+          entry.type !== "tool_call" ||
+          entry.data.status !== "done" ||
+          !output?.reasoning
+        )
+          return null;
+        return (
+          <div className="mt-1 ml-[5.5rem] space-y-1">
+            <p className="text-xs text-gray-500 italic">
+              {String(output.reasoning)}
+            </p>
+            {output.impact ? (
+              <p className="text-xs text-white font-semibold">
+                {String(output.impact)}
+              </p>
+            ) : null}
+          </div>
+        );
+      })()}
+
       {expanded && (
         <div className="mt-2 ml-[5.5rem]">
           <pre className="bg-navy-950 rounded p-3 text-xs text-gray-400 overflow-x-auto max-h-60 scrollbar-thin">
