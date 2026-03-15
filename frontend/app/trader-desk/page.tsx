@@ -7,7 +7,7 @@ import { fetchMarketStatus } from "@/lib/api";
 import Navbar from "@/components/Navbar";
 import TickerBar from "@/components/TickerBar";
 import MarketCommentary from "@/components/MarketCommentary";
-import type { StockQuote, TradeActivity, MarketStatus } from "@/lib/types";
+import type { AgentState, StockQuote, TradeActivity, MarketStatus } from "@/lib/types";
 
 // ---------- helpers ----------
 
@@ -119,6 +119,51 @@ function MarketClosedBanner({
       </div>
     </div>
   );
+}
+
+const STABILIZING_STATES = new Set<AgentState>([
+  "cache_activated",
+  "load_shedding_enabled",
+  "backup_pricing_active",
+]);
+
+const POST_STABILIZATION_STATES = new Set<AgentState>([
+  "incident_created",
+  "investigating",
+  "analyzing",
+  "fix_generated",
+  "ticket_created",
+  "awaiting_approval",
+]);
+
+function StabilizationBanner({
+  currentState,
+}: {
+  currentState: AgentState;
+}) {
+  if (STABILIZING_STATES.has(currentState)) {
+    return (
+      <div className="bg-accent-amber/10 border-b border-accent-amber/30 px-4 py-2 flex items-center justify-center gap-3">
+        <span className="w-2 h-2 rounded-full bg-accent-amber animate-pulse" />
+        <span className="text-sm font-bold text-accent-amber tracking-wide">
+          STABILIZING &mdash; Agent applying short-term fixes
+        </span>
+      </div>
+    );
+  }
+
+  if (POST_STABILIZATION_STATES.has(currentState)) {
+    return (
+      <div className="bg-accent-green/10 border-b border-accent-green/30 px-4 py-2 flex items-center justify-center gap-3">
+        <span className="w-2 h-2 rounded-full bg-accent-green" />
+        <span className="text-sm font-bold text-accent-green tracking-wide">
+          PLATFORM STABILIZED &mdash; Short-term fixes active, investigating root cause
+        </span>
+      </div>
+    );
+  }
+
+  return null;
 }
 
 function Watchlist({
@@ -722,6 +767,9 @@ function SystemStatus({
     idle: { text: "IDLE", color: "bg-gray-600/20 text-gray-400" },
     monitoring: { text: "MONITORING", color: "bg-accent-blue/20 text-accent-blue" },
     anomaly_detected: { text: "ALERT", color: "bg-accent-red/20 text-accent-red" },
+    cache_activated: { text: "STABILIZING", color: "bg-accent-amber/20 text-accent-amber" },
+    load_shedding_enabled: { text: "STABILIZING", color: "bg-accent-amber/20 text-accent-amber" },
+    backup_pricing_active: { text: "STABILIZED", color: "bg-accent-green/20 text-accent-green" },
     incident_created: { text: "INCIDENT", color: "bg-accent-red/20 text-accent-red" },
     investigating: { text: "INVESTIGATING", color: "bg-accent-amber/20 text-accent-amber" },
     analyzing: { text: "ANALYZING", color: "bg-accent-amber/20 text-accent-amber" },
@@ -876,6 +924,7 @@ export default function TraderDesk() {
         isStale={isStale}
         lastFetchTime={lastFetchTime}
       />
+      <StabilizationBanner currentState={currentState} />
 
       <div className="max-w-[1600px] mx-auto px-3 py-3">
         {/* Header */}
