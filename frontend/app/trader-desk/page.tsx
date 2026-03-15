@@ -6,6 +6,7 @@ import { useMarketData } from "@/lib/useMarketData";
 import { fetchMarketStatus } from "@/lib/api";
 import Navbar from "@/components/Navbar";
 import TickerBar from "@/components/TickerBar";
+import MarketCommentary from "@/components/MarketCommentary";
 import type { StockQuote, TradeActivity, MarketStatus } from "@/lib/types";
 
 // ---------- helpers ----------
@@ -954,6 +955,11 @@ export default function TraderDesk() {
               currentState={currentState}
               metrics={metrics}
             />
+          </div>
+
+          {/* AI Market Commentary — full width */}
+          <div className="lg:col-span-12">
+            <MarketCommentary />
           </div>
         </div>
       </div>
