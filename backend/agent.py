@@ -643,12 +643,12 @@ TOOL_MAP = {
         file_path=args["file_path"],
     ),
     "identify_missing_patterns": lambda args: tool_identify_missing_patterns(
-        source_code=args["source_code"],
-        file_name=args["file_name"],
+        source_code=args.get("source_code", ""),
+        file_name=args.get("file_name", "unknown"),
     ),
     "generate_optimized_code": lambda args: tool_generate_optimized_code(
-        source_code=args["source_code"],
-        patterns=args["patterns"],
+        source_code=args.get("source_code", ""),
+        patterns=args.get("patterns", []),
     ),
     "create_jira_ticket": lambda args: tool_create_jira_ticket(
         summary=args["summary"],
@@ -821,7 +821,7 @@ async def run_agent(
                     break
 
                 # Approved — continue with resolve instruction
-                demo_state.transition(AgentState.APPROVED)
+                # Note: transition already done by POST /agent/approve endpoint
                 await event_queue.put({
                     "type": "state_change",
                     "data": {"state": "approved", "message": "Human approved — resolving incident"},

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { useAgentStream } from "@/lib/useAgentStream";
+import { useAgentStreamContext } from "@/lib/AgentStreamContext";
 import {
   startAgent,
   resetDemo,
@@ -14,7 +14,7 @@ import Navbar from "@/components/Navbar";
 import type { ConfigEntry, RunHistoryEntry } from "@/lib/types";
 
 export default function AdminPage() {
-  const { isConnected, currentState, resetStream } = useAgentStream();
+  const { isConnected, currentState, resetStream } = useAgentStreamContext();
   const [config, setConfig] = useState<Record<string, ConfigEntry>>({});
   const [history, setHistory] = useState<RunHistoryEntry[]>([]);
   const [chaosEnabled, setChaosEnabled] = useState(false);

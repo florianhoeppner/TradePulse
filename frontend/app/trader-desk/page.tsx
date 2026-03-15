@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo, useCallback } from "react";
-import { useAgentStream } from "@/lib/useAgentStream";
+import { useAgentStreamContext } from "@/lib/AgentStreamContext";
 import { useMarketData } from "@/lib/useMarketData";
 import { fetchMarketStatus } from "@/lib/api";
 import Navbar from "@/components/Navbar";
@@ -837,7 +837,7 @@ function SystemStatus({
 // ---------- page ----------
 
 export default function TraderDesk() {
-  const { currentState, metrics, isConnected } = useAgentStream();
+  const { currentState, metrics, isConnected } = useAgentStreamContext();
   const { stocks, trades, lastFetchTime, isStale } = useMarketData();
 
   const [selectedSymbol, setSelectedSymbol] = useState<string>("");
