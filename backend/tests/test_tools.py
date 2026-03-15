@@ -13,6 +13,9 @@ from agent import (
     tool_generate_optimized_code,
     tool_create_jira_ticket,
     tool_resolve_pagerduty_incident,
+    tool_activate_price_cache,
+    tool_enable_load_shedding,
+    tool_switch_to_backup_pricing,
     TOOLS,
 )
 
@@ -24,8 +27,8 @@ class TestToolDefinitions:
             assert "description" in tool
             assert "input_schema" in tool
 
-    def test_seven_tools_defined(self):
-        assert len(TOOLS) == 7
+    def test_ten_tools_defined(self):
+        assert len(TOOLS) == 10
 
     def test_tool_names(self):
         names = {t["name"] for t in TOOLS}
@@ -37,6 +40,9 @@ class TestToolDefinitions:
             "generate_optimized_code",
             "create_jira_ticket",
             "resolve_pagerduty_incident",
+            "activate_price_cache",
+            "enable_load_shedding",
+            "switch_to_backup_pricing",
         }
         assert names == expected
 
@@ -266,3 +272,81 @@ class TestResolvePagerDutyIncident:
         )
         assert result["resolve_status"] == "success"
         assert result["change_event_status"] == "logged"
+
+
+class TestActivatePriceCache:
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_activates_cache(self):
+        respx.post("http://trading-service:8001/admin/cache/activate").mock(
+            return_value=httpx.Response(200, json={
+                "status": "activated",
+                "cache_active": True,
+                "message": "Price cache activated",
+            })
+        )
+        result = await tool_activate_price_cache()
+        assert result["cache_active"] is True
+        assert "reasoning" in result
+        assert "impact" in result
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_handles_failure(self):
+        respx.post("http://trading-service:8001/admin/cache/activate").mock(
+            return_value=httpx.Response(500, text="Internal Server Error")
+        )
+        result = await tool_activate_price_cache()
+        assert "error" in result
+
+
+class TestEnableLoadShedding:
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_enables_load_shedding(self):
+        respx.post("http://trading-service:8001/admin/load-shedding/activate").mock(
+            return_value=httpx.Response(200, json={
+                "status": "activated",
+                "load_shedding_active": True,
+                "max_concurrent": 3,
+                "message": "Load shedding active",
+            })
+        )
+        result = await tool_enable_load_shedding()
+        assert result["load_shedding_active"] is True
+        assert "reasoning" in result
+        assert "impact" in result
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_handles_failure(self):
+        respx.post("http://trading-service:8001/admin/load-shedding/activate").mock(
+            return_value=httpx.Response(500, text="Internal Server Error")
+        )
+        result = await tool_enable_load_shedding()
+        assert "error" in result
+
+
+class TestSwitchToBackupPricing:
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_switches_to_backup(self):
+        respx.post("http://trading-service:8001/admin/pricing-source/backup").mock(
+            return_value=httpx.Response(200, json={
+                "pricing_source": "backup",
+                "message": "Switched to backup pricing source",
+            })
+        )
+        result = await tool_switch_to_backup_pricing()
+        assert result["pricing_source"] == "backup"
+        assert "reasoning" in result
+        assert "impact" in result
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_handles_failure(self):
+        respx.post("http://trading-service:8001/admin/pricing-source/backup").mock(
+            return_value=httpx.Response(500, text="Internal Server Error")
+        )
+        result = await tool_switch_to_backup_pricing()
+        assert "error" in result

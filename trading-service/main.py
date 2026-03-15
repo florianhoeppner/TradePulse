@@ -13,9 +13,11 @@ from datetime import datetime, timezone
 
 from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
-from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
+from prometheus_client import Counter, Gauge, Histogram, generate_latest, CONTENT_TYPE_LATEST
 
 from pricing_client import PricingClient, SUPPORTED_SYMBOLS
+from price_cache import PriceCache
+from load_shedder import LoadShedder
 
 
 # --- Prometheus Metrics ---
@@ -36,6 +38,32 @@ PRICING_ERRORS = Counter(
     "tradepulse_pricing_errors_total",
     "Total pricing errors",
     ["symbol", "error_type"],
+)
+
+# Short-term response metrics
+CACHE_ACTIVE = Gauge(
+    "tradepulse_cache_active",
+    "Whether the price cache is active (0 or 1)",
+)
+
+CACHE_AGE_SECONDS = Gauge(
+    "tradepulse_cache_age_seconds",
+    "Seconds since the price cache was activated",
+)
+
+SHED_REQUESTS_TOTAL = Counter(
+    "tradepulse_shed_requests_total",
+    "Total number of requests shed by load shedder",
+)
+
+QUEUE_DEPTH = Gauge(
+    "tradepulse_queue_depth",
+    "Current number of requests queued by load shedder",
+)
+
+PRICING_SOURCE = Gauge(
+    "tradepulse_pricing_source",
+    "Active pricing source (0=primary, 1=backup)",
 )
 
 # --- Latency Tracker (direct p99 without Prometheus) ---
@@ -79,6 +107,8 @@ trade_activity: collections.deque[TradeEntry] = collections.deque(maxlen=MAX_ACT
 # --- Globals ---
 
 pricing_client = PricingClient()
+price_cache = PriceCache()
+load_shedder = LoadShedder()
 background_task = None
 
 
@@ -95,6 +125,12 @@ async def simulate_orders():
             pass  # Non-fatal — will be populated on next cycle
 
     while True:
+        # Update Prometheus gauges for short-term response state
+        CACHE_ACTIVE.set(1 if price_cache.active else 0)
+        CACHE_AGE_SECONDS.set(price_cache.age_seconds())
+        QUEUE_DEPTH.set(load_shedder.queue_depth)
+        PRICING_SOURCE.set(1 if pricing_client.pricing_source == "backup" else 0)
+
         # Process 2 symbols per cycle for a more active trading floor feel
         for _ in range(2):
             symbol = random.choice(SUPPORTED_SYMBOLS)
@@ -102,7 +138,41 @@ async def simulate_orders():
             quantity = random.choice([50, 100, 200, 500, 1000])
             try:
                 start = time.monotonic()
-                price = await loop.run_in_executor(None, pricing_client.get_price, symbol)
+
+                # Short-term: serve from cache if active and price available
+                cached_price = None
+                if price_cache.active:
+                    cached_price = price_cache.get_cached_price(
+                        pricing_client.price_history, symbol
+                    )
+
+                if cached_price is not None:
+                    price = cached_price
+                elif load_shedder.active:
+                    # Load shedding: limit concurrent requests
+                    acquired = await load_shedder.acquire()
+                    if acquired:
+                        try:
+                            price = await loop.run_in_executor(
+                                None, pricing_client.get_price, symbol
+                            )
+                        finally:
+                            load_shedder.release()
+                    else:
+                        # Shed: serve from cache if possible, else skip
+                        SHED_REQUESTS_TOTAL.inc()
+                        cached_price = price_cache.get_cached_price(
+                            pricing_client.price_history, symbol
+                        )
+                        if cached_price is not None:
+                            price = cached_price
+                        else:
+                            raise RuntimeError(f"Load shed and no cached price for {symbol}")
+                else:
+                    price = await loop.run_in_executor(
+                        None, pricing_client.get_price, symbol
+                    )
+
                 elapsed = time.monotonic() - start
 
                 ORDER_LATENCY.observe(elapsed)
@@ -255,6 +325,74 @@ async def chaos_status():
     return {"chaos_mode": pricing_client.chaos_mode}
 
 
+# --- Short-Term Response Endpoints ---
+
+
+@app.post("/admin/cache/activate")
+async def cache_activate():
+    """Activate price cache — serve last-known-good prices."""
+    result = price_cache.activate()
+    CACHE_ACTIVE.set(1)
+    return result
+
+
+@app.post("/admin/cache/deactivate")
+async def cache_deactivate():
+    """Deactivate price cache — resume live pricing."""
+    result = price_cache.deactivate()
+    CACHE_ACTIVE.set(0)
+    CACHE_AGE_SECONDS.set(0)
+    return result
+
+
+@app.post("/admin/load-shedding/activate")
+async def load_shedding_activate():
+    """Activate load shedding — limit concurrent pricing requests."""
+    result = load_shedder.activate()
+    return result
+
+
+@app.post("/admin/load-shedding/deactivate")
+async def load_shedding_deactivate():
+    """Deactivate load shedding — allow unlimited concurrent requests."""
+    result = load_shedder.deactivate()
+    QUEUE_DEPTH.set(0)
+    return result
+
+
+@app.post("/admin/pricing-source/backup")
+async def pricing_source_backup():
+    """Switch to backup pricing source (yfinance download method)."""
+    pricing_client.pricing_source = "backup"
+    PRICING_SOURCE.set(1)
+    return {
+        "pricing_source": "backup",
+        "message": "Switched to backup pricing source (bulk download method)",
+    }
+
+
+@app.post("/admin/pricing-source/primary")
+async def pricing_source_primary():
+    """Switch to primary pricing source (yfinance fast_info method)."""
+    pricing_client.pricing_source = "primary"
+    PRICING_SOURCE.set(0)
+    return {
+        "pricing_source": "primary",
+        "message": "Switched to primary pricing source (fast_info method)",
+    }
+
+
+@app.get("/admin/platform-status")
+async def platform_status():
+    """Return combined status of all short-term response controls."""
+    return {
+        "cache": price_cache.status(),
+        "load_shedding": load_shedder.status(),
+        "pricing_source": pricing_client.pricing_source,
+        "chaos_mode": pricing_client.chaos_mode,
+    }
+
+
 @app.get("/market/status")
 async def market_status():
     """Return whether the NYSE market is currently open and when it next opens."""
@@ -282,5 +420,8 @@ async def metrics_summary():
         "total_errors": error_count,
         "sample_count": len(samples),
         "chaos_mode": pricing_client.chaos_mode,
+        "cache_active": price_cache.active,
+        "load_shedding_active": load_shedder.active,
+        "pricing_source": pricing_client.pricing_source,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }

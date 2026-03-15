@@ -2,6 +2,9 @@ export type AgentState =
   | "idle"
   | "monitoring"
   | "anomaly_detected"
+  | "cache_activated"
+  | "load_shedding_enabled"
+  | "backup_pricing_active"
   | "incident_created"
   | "investigating"
   | "analyzing"
@@ -21,6 +24,7 @@ export interface TimelineStepData {
   link?: string;
   data?: Record<string, unknown>;
   timestamp?: string;
+  track?: "short-term" | "long-term";
 }
 
 export interface ToolCallEvent {
@@ -80,4 +84,11 @@ export interface MarketStatus {
   exchange: string;
   next_open_utc: string;
   current_time_et: string;
+}
+
+export interface PlatformStatus {
+  cache: { active: boolean; age_seconds: number };
+  load_shedding: { active: boolean; shed_count: number; queue_depth: number };
+  pricing_source: "primary" | "backup";
+  chaos_mode: boolean;
 }

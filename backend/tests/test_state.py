@@ -67,6 +67,11 @@ class TestDemoState:
         states = [
             AgentState.MONITORING,
             AgentState.ANOMALY_DETECTED,
+            # Short-term track
+            AgentState.CACHE_ACTIVATED,
+            AgentState.LOAD_SHEDDING_ENABLED,
+            AgentState.BACKUP_PRICING_ACTIVE,
+            # Long-term track
             AgentState.INCIDENT_CREATED,
             AgentState.INVESTIGATING,
             AgentState.ANALYZING,
@@ -81,6 +86,24 @@ class TestDemoState:
             ds.transition(state)
         assert ds.state == AgentState.IDLE
         assert len(ds.history) == len(states)
+
+    def test_short_term_track_transitions(self):
+        ds = DemoState()
+        ds.transition(AgentState.MONITORING)
+        ds.transition(AgentState.ANOMALY_DETECTED)
+        ds.transition(AgentState.CACHE_ACTIVATED)
+        ds.transition(AgentState.LOAD_SHEDDING_ENABLED)
+        ds.transition(AgentState.BACKUP_PRICING_ACTIVE)
+        ds.transition(AgentState.INCIDENT_CREATED)
+        assert ds.state == AgentState.INCIDENT_CREATED
+
+    def test_skip_short_term_track(self):
+        """Agent can skip short-term and go directly to incident creation."""
+        ds = DemoState()
+        ds.transition(AgentState.MONITORING)
+        ds.transition(AgentState.ANOMALY_DETECTED)
+        ds.transition(AgentState.INCIDENT_CREATED)
+        assert ds.state == AgentState.INCIDENT_CREATED
 
 
 class TestRunHistory:

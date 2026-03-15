@@ -6,7 +6,7 @@ import { useMarketData } from "@/lib/useMarketData";
 import { startAgent, approveAction, rejectAction } from "@/lib/api";
 import Navbar from "@/components/Navbar";
 import TickerBar from "@/components/TickerBar";
-import TimelineStep from "@/components/TimelineStep";
+import DualTrack from "@/components/DualTrack";
 import ApprovalCard from "@/components/ApprovalCard";
 import MetricsChart from "@/components/MetricsChart";
 import AgentThinking from "@/components/AgentThinking";
@@ -71,6 +71,9 @@ export default function Dashboard() {
     idle: { text: "IDLE", color: "text-gray-400" },
     monitoring: { text: "MONITORING", color: "text-accent-blue" },
     anomaly_detected: { text: "ALERT", color: "text-accent-red" },
+    cache_activated: { text: "STABILIZING", color: "text-accent-amber" },
+    load_shedding_enabled: { text: "STABILIZING", color: "text-accent-amber" },
+    backup_pricing_active: { text: "STABILIZING", color: "text-accent-amber" },
     incident_created: { text: "RESPONDING", color: "text-accent-amber" },
     investigating: { text: "INVESTIGATING", color: "text-accent-amber" },
     analyzing: { text: "ANALYZING", color: "text-accent-amber" },
@@ -167,13 +170,7 @@ export default function Dashboard() {
               </div>
             )}
 
-            {steps.map((step, i) => (
-              <TimelineStep
-                key={step.id}
-                step={step}
-                isLast={i === steps.length - 1}
-              />
-            ))}
+            <DualTrack steps={steps} />
 
             {/* Approval Card */}
             {currentState === "awaiting_approval" && (

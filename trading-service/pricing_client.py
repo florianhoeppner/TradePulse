@@ -80,6 +80,7 @@ class PricingClient:
 
     def __init__(self):
         self.chaos_mode = False
+        self.pricing_source = "primary"  # "primary" or "backup"
         # Price history per symbol for sparklines and change calculation
         self.price_history: dict[str, collections.deque[PriceSnapshot]] = {
             sym: collections.deque(maxlen=MAX_PRICE_HISTORY)
@@ -132,6 +133,9 @@ class PricingClient:
         if symbol not in SUPPORTED_SYMBOLS:
             raise ValueError(f"Unsupported symbol: {symbol}")
 
+        if self.pricing_source == "backup":
+            return self._get_price_backup(symbol)
+
         # In chaos mode, simulate upstream latency / degradation
         if self.chaos_mode:
             delay = random.uniform(2.0, 5.0)
@@ -145,6 +149,23 @@ class PricingClient:
             # Fallback to previous close when live price unavailable
             price = data["previousClose"]
         price = round(price, 2)
+
+        # Record price snapshot
+        self.price_history[symbol].append(
+            PriceSnapshot(price, datetime.now(timezone.utc).isoformat())
+        )
+
+        return price
+
+    def _get_price_backup(self, symbol: str) -> float:
+        """
+        Backup pricing via yfinance download() instead of fast_info.
+        More reliable under load — uses bulk download method.
+        """
+        data = yf.download(symbol, period="1d", progress=False)
+        if data.empty:
+            raise ValueError(f"No data from backup source for {symbol}")
+        price = round(float(data["Close"].iloc[-1]), 2)
 
         # Record price snapshot
         self.price_history[symbol].append(
