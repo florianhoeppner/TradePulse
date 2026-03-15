@@ -11,7 +11,7 @@ import ApprovalCard from "@/components/ApprovalCard";
 import MetricsChart from "@/components/MetricsChart";
 import AgentThinking from "@/components/AgentThinking";
 import ImpactCounter from "@/components/ImpactCounter";
-import MarketCommentary from "@/components/MarketCommentary";
+
 
 export default function Dashboard() {
   const {
@@ -194,9 +194,6 @@ export default function Dashboard() {
               metrics={metrics}
               isIncident={isIncident}
             />
-
-            {/* AI Market Commentary */}
-            <MarketCommentary />
 
             {/* p99 Latency Chart */}
             <MetricsChart dataPoints={metrics} />
