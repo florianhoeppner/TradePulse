@@ -10,8 +10,6 @@ import TimelineStep from "@/components/TimelineStep";
 import ApprovalCard from "@/components/ApprovalCard";
 import MetricsChart from "@/components/MetricsChart";
 import AgentThinking from "@/components/AgentThinking";
-import MarketPanel from "@/components/MarketPanel";
-import ActivityFeed from "@/components/ActivityFeed";
 import ImpactCounter from "@/components/ImpactCounter";
 import MarketCommentary from "@/components/MarketCommentary";
 
@@ -27,7 +25,7 @@ export default function Dashboard() {
     optimizedCode,
   } = useAgentStream();
 
-  const { stocks, trades, isStale } = useMarketData();
+  const { stocks, isStale } = useMarketData();
 
   const [actionLoading, setActionLoading] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -105,7 +103,7 @@ export default function Dashboard() {
               AI Incident Response
             </h1>
             <p className="text-sm text-gray-400 mt-1">
-              Real-time agent monitoring and automated remediation
+              Real-time agent monitoring and automated remediation for demo audience
             </p>
           </div>
           <div className="flex items-center gap-4">
@@ -199,12 +197,6 @@ export default function Dashboard() {
 
             {/* AI Market Commentary */}
             <MarketCommentary />
-
-            {/* Live Market Data */}
-            <MarketPanel stocks={stocks} isStale={isStale} />
-
-            {/* Trading Activity Feed */}
-            <ActivityFeed trades={trades} />
 
             {/* p99 Latency Chart */}
             <MetricsChart dataPoints={metrics} />
