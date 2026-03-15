@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useAgentStream } from "@/lib/useAgentStream";
+import { useAgentStreamContext } from "@/lib/AgentStreamContext";
 import { useMarketData } from "@/lib/useMarketData";
 import { startAgent, approveAction, rejectAction } from "@/lib/api";
 import Navbar from "@/components/Navbar";
@@ -23,7 +23,7 @@ export default function Dashboard() {
     jiraUrl,
     originalCode,
     optimizedCode,
-  } = useAgentStream();
+  } = useAgentStreamContext();
 
   const { stocks, isStale } = useMarketData();
 

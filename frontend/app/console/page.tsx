@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useEffect, useState } from "react";
-import { useAgentStream } from "@/lib/useAgentStream";
+import { useAgentStreamContext } from "@/lib/AgentStreamContext";
 import Navbar from "@/components/Navbar";
 import type { ConsoleEntry } from "@/lib/types";
 
@@ -62,7 +62,7 @@ function ConsoleEntryRow({ entry }: { entry: ConsoleEntry }) {
 }
 
 export default function ConsolePage() {
-  const { consoleLog, isConnected } = useAgentStream();
+  const { consoleLog, isConnected } = useAgentStreamContext();
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
