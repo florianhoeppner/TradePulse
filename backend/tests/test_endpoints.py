@@ -134,6 +134,25 @@ class TestAdminChaos:
         assert response.json()["chaos_mode"] is False
 
     @pytest.mark.asyncio
+    @respx.mock
+    async def test_chaos_status(self, transport):
+        respx.get(f"{TRADING_BASE}/chaos/status").mock(
+            return_value=Response(200, json={"chaos_mode": True})
+        )
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.get("/admin/chaos/status")
+        assert response.status_code == 200
+        assert response.json()["chaos_mode"] is True
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_chaos_status_trading_service_down(self, transport):
+        respx.get(f"{TRADING_BASE}/chaos/status").mock(side_effect=Exception("connection refused"))
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.get("/admin/chaos/status")
+        assert response.status_code == 502
+
+    @pytest.mark.asyncio
     async def test_chaos_invalid_mode(self, transport):
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             response = await client.post("/admin/chaos/invalid")

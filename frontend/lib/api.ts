@@ -53,6 +53,10 @@ export function toggleChaos(enable: boolean) {
   });
 }
 
+export function getChaosStatus() {
+  return apiCall("/admin/chaos/status");
+}
+
 export function getStatus() {
   return apiCall("/agent/status");
 }

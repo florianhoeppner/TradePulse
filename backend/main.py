@@ -299,6 +299,20 @@ async def admin_chaos(mode: str):
         )
 
 
+@app.get("/admin/chaos/status")
+async def admin_chaos_status():
+    """Get current chaos mode status from the trading service."""
+    try:
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+            response = await client.get(f"{TRADING_SERVICE_URL}/chaos/status")
+            return response.json()
+    except Exception as e:
+        return JSONResponse(
+            status_code=502,
+            content={"error": f"Failed to fetch chaos status: {str(e)}"},
+        )
+
+
 @app.get("/admin/config")
 async def admin_config():
     """Return environment variable names (not values) and their configuration status."""

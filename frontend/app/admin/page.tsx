@@ -6,6 +6,7 @@ import {
   startAgent,
   resetDemo,
   toggleChaos,
+  getChaosStatus,
   getConfig,
   getHistory,
 } from "@/lib/api";
@@ -31,10 +32,14 @@ export default function AdminPage() {
   const [configError, setConfigError] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
-    const [configRes, historyRes] = await Promise.all([
+    const [configRes, historyRes, chaosRes] = await Promise.all([
       getConfig(),
       getHistory(),
+      getChaosStatus(),
     ]);
+    if (chaosRes.ok && chaosRes.data) {
+      setChaosEnabled((chaosRes.data as { chaos_mode: boolean }).chaos_mode);
+    }
     if (configRes.ok && configRes.data) {
       setConfig(
         (configRes.data as { config: Record<string, ConfigEntry> }).config
