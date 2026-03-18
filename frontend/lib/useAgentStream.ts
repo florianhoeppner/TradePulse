@@ -7,6 +7,8 @@ import type {
   TimelineStepData,
   ConsoleEntry,
   MetricsDataPoint,
+  RiskTableData,
+  RiskNeutralized,
 } from "./types";
 
 const SHORT_TERM_STATES = new Set([
@@ -88,6 +90,8 @@ export function useAgentStream() {
   const [jiraUrl, setJiraUrl] = useState<string>("");
   const [originalCode, setOriginalCode] = useState<string>("");
   const [optimizedCode, setOptimizedCode] = useState<string>("");
+  const [riskTable, setRiskTable] = useState<RiskTableData | null>(null);
+  const [riskNeutralized, setRiskNeutralized] = useState<RiskNeutralized | null>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -230,6 +234,23 @@ export function useAgentStream() {
       }
     });
 
+    // Economic risk events
+    es.addEventListener("risk_table", (event) => {
+      const data = JSON.parse(event.data) as RiskTableData;
+      setRiskTable(data);
+      addConsoleEntry("tool_call", { tool: "assess_economic_risk", output: data, status: "done" });
+    });
+
+    es.addEventListener("risk_update", (event) => {
+      const data = JSON.parse(event.data) as RiskNeutralized;
+      setRiskNeutralized(data);
+    });
+
+    es.addEventListener("economic_narration", (event) => {
+      const data = JSON.parse(event.data);
+      addConsoleEntry("thinking", { reasoning: data.message, subtype: data.subtype });
+    });
+
     es.addEventListener("error", (event) => {
       try {
         const data = JSON.parse((event as MessageEvent).data);
@@ -271,6 +292,8 @@ export function useAgentStream() {
     setJiraUrl("");
     setOriginalCode("");
     setOptimizedCode("");
+    setRiskTable(null);
+    setRiskNeutralized(null);
   }, []);
 
   return {
@@ -282,6 +305,8 @@ export function useAgentStream() {
     jiraUrl,
     originalCode,
     optimizedCode,
+    riskTable,
+    riskNeutralized,
     resetStream,
   };
 }

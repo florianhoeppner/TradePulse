@@ -50,6 +50,32 @@ TOOLS = [
         },
     },
     {
+        "name": "assess_economic_risk",
+        "description": (
+            "Translate technical latency findings into dollar-denominated business risk "
+            "using the platform's economic profile. Must be called immediately after "
+            "detecting a latency anomaly and before taking any mitigation action."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "p99_latency_ms": {
+                    "type": "number",
+                    "description": "Current p99 latency in milliseconds",
+                },
+                "threshold_ms": {
+                    "type": "number",
+                    "description": "SLA threshold in milliseconds",
+                },
+                "estimated_minutes_to_breach": {
+                    "type": "number",
+                    "description": "Estimated minutes until SLA breach",
+                },
+            },
+            "required": ["p99_latency_ms", "threshold_ms"],
+        },
+    },
+    {
         "name": "create_pagerduty_incident",
         "description": (
             "Create a real PagerDuty incident via the Events API v2. "
@@ -286,6 +312,165 @@ async def tool_detect_latency_anomaly() -> dict[str, Any]:
             "threshold_ms": 2000,
             "breached": None,
         }
+
+
+async def tool_assess_economic_risk(
+    demo_state: "DemoState",
+    event_queue: asyncio.Queue,
+    p99_latency_ms: float,
+    threshold_ms: float,
+    estimated_minutes_to_breach: float = 5.0,
+) -> dict[str, Any]:
+    """Translate technical findings into dollar risk using Claude reasoning."""
+    import anthropic
+
+    profile = demo_state.economic_profile
+    avg_order_value = profile["avg_order_value_usd"]
+    orders_per_minute = profile["orders_per_minute"]
+    sla_breach_penalty = profile["sla_breach_penalty_usd"]
+    revenue_per_min = avg_order_value * orders_per_minute
+
+    # Emit THINKING narration
+    await event_queue.put({
+        "type": "economic_narration",
+        "data": {
+            "subtype": "thinking",
+            "message": (
+                "I know the technical problem. Before I act, I need to quantify what it costs. "
+                "A decision backed by numbers is a decision a CIO can defend."
+            ),
+        },
+    })
+
+    # Emit ACTION narration
+    await event_queue.put({
+        "type": "economic_narration",
+        "data": {
+            "subtype": "action",
+            "message": (
+                f"Reading economic profile. Computing revenue exposure at {orders_per_minute} "
+                f"orders/min \u00d7 ${avg_order_value:,} avg order value = "
+                f"${revenue_per_min:,}/min at risk."
+            ),
+        },
+    })
+
+    # Inner Claude call for risk analysis
+    risk_system_prompt = (
+        "You are an economic risk analyst for a trading platform. You receive technical "
+        "incident data and a cost profile. You must output a JSON risk table with exactly "
+        "these findings assessed:\n"
+        "findings:\n"
+        "  - latency_spike: the p99 latency anomaly. This directly blocks order execution.\n"
+        "  - pricing_source_degradation: the backup pricing source has higher latency. "
+        "Affects order quality but not order volume.\n"
+        "  - queue_depth_buildup: orders queuing up. Secondary effect, not yet critical.\n"
+        "  - cache_miss_rate: cache not yet active. Negligible until cache activated.\n"
+        "For each finding output:\n"
+        "  - finding_name\n"
+        "  - risk_usd_low\n"
+        "  - risk_usd_high\n"
+        "  - sla_relevant (boolean)\n"
+        "  - rationale (one sentence, plain English, no jargon)\n"
+        "Base your calculations on:\n"
+        f"  revenue_at_risk_per_minute: {revenue_per_min}\n"
+        f"  sla_breach_penalty: {sla_breach_penalty}\n"
+        f"  estimated_minutes_to_breach: {estimated_minutes_to_breach}\n"
+        f"  p99_latency_ms: {p99_latency_ms}\n"
+        f"  threshold_ms: {threshold_ms}\n"
+        "Respond with valid JSON only. No markdown. No explanation outside the JSON."
+    )
+
+    try:
+        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        loop = asyncio.get_event_loop()
+        message = await loop.run_in_executor(None, lambda: client.messages.create(
+            model=MODEL,
+            max_tokens=1024,
+            messages=[{"role": "user", "content": risk_system_prompt}],
+        ))
+        raw_text = message.content[0].text.strip()
+        risk_data = json.loads(raw_text)
+    except Exception as e:
+        # Fallback: compute deterministic risk if Claude call fails
+        risk_data = {
+            "findings": [
+                {
+                    "finding_name": "latency_spike",
+                    "risk_usd_low": int(revenue_per_min * estimated_minutes_to_breach * 0.6),
+                    "risk_usd_high": int(revenue_per_min * estimated_minutes_to_breach + sla_breach_penalty * 0.5),
+                    "sla_relevant": True,
+                    "rationale": f"p99 at {p99_latency_ms}ms blocks order execution, risking revenue loss.",
+                },
+                {
+                    "finding_name": "pricing_source_degradation",
+                    "risk_usd_low": int(revenue_per_min * 0.8),
+                    "risk_usd_high": int(revenue_per_min * 1.2),
+                    "sla_relevant": True,
+                    "rationale": "Backup pricing source has higher latency, affecting order quality.",
+                },
+                {
+                    "finding_name": "queue_depth_buildup",
+                    "risk_usd_low": 0,
+                    "risk_usd_high": int(revenue_per_min * 0.15),
+                    "sla_relevant": False,
+                    "rationale": "Orders queuing up as a secondary effect, not yet critical.",
+                },
+                {
+                    "finding_name": "cache_miss_rate",
+                    "risk_usd_low": 0,
+                    "risk_usd_high": 0,
+                    "sla_relevant": False,
+                    "rationale": "Cache not yet active, negligible impact until activated.",
+                },
+            ]
+        }
+
+    findings = risk_data.get("findings", [])
+
+    # Sum total risk from SLA-relevant findings only
+    total_low = sum(f.get("risk_usd_low", 0) for f in findings if f.get("sla_relevant"))
+    total_high = sum(f.get("risk_usd_high", 0) for f in findings if f.get("sla_relevant"))
+
+    # Store in state
+    demo_state.economic_risk_assessment = risk_data
+    demo_state.total_risk_usd_low = total_low
+    demo_state.total_risk_usd_high = total_high
+
+    # Emit RESULT as structured risk_table
+    risk_table = {
+        "type": "risk_table",
+        "findings": findings,
+        "total_low": total_low,
+        "total_high": total_high,
+    }
+    await event_queue.put({
+        "type": "risk_table",
+        "data": risk_table,
+    })
+
+    # Count non-SLA findings
+    irrelevant_count = sum(1 for f in findings if not f.get("sla_relevant"))
+
+    # Emit IMPACT narration
+    await event_queue.put({
+        "type": "economic_narration",
+        "data": {
+            "subtype": "impact",
+            "message": (
+                f"Two findings carry ${total_low:,}\u2013${total_high:,} of business risk. "
+                f"{irrelevant_count} findings are noise and can wait. "
+                "Initiating targeted mitigations now."
+            ),
+        },
+    })
+
+    return {
+        "risk_table": risk_table,
+        "total_risk_usd_low": total_low,
+        "total_risk_usd_high": total_high,
+        "revenue_at_risk_per_minute": revenue_per_min,
+    }
 
 
 async def tool_create_pagerduty_incident(summary: str, severity: str, latency_ms: float) -> dict[str, Any]:
@@ -739,6 +924,7 @@ async def tool_switch_to_backup_pricing() -> dict[str, Any]:
 
 # --- Tool Dispatcher ---
 
+# Base tool map for tools that don't need demo_state/event_queue
 TOOL_MAP = {
     "detect_latency_anomaly": lambda args: tool_detect_latency_anomaly(),
     "create_pagerduty_incident": lambda args: tool_create_pagerduty_incident(
@@ -772,6 +958,72 @@ TOOL_MAP = {
     "switch_to_backup_pricing": lambda args: tool_switch_to_backup_pricing(),
 }
 
+
+def _build_tool_map(demo_state: DemoState, event_queue: asyncio.Queue) -> dict:
+    """Build a tool map that includes tools needing demo_state and event_queue."""
+    extended = dict(TOOL_MAP)
+    extended["assess_economic_risk"] = lambda args: tool_assess_economic_risk(
+        demo_state=demo_state,
+        event_queue=event_queue,
+        p99_latency_ms=args.get("p99_latency_ms", 0),
+        threshold_ms=args.get("threshold_ms", 2000),
+        estimated_minutes_to_breach=args.get("estimated_minutes_to_breach", 5.0),
+    )
+    return extended
+
+
+# Risk neutralization percentages by finding
+_RISK_NEUTRALIZATION = {
+    "activate_price_cache": {"latency_spike": 0.60},
+    "enable_load_shedding": {"queue_depth_buildup": 0.25},
+    "switch_to_backup_pricing": {"pricing_source_degradation": 1.0},
+}
+
+
+async def _update_risk_neutralization(
+    tool_name: str,
+    demo_state: DemoState,
+    event_queue: asyncio.Queue,
+) -> None:
+    """After a short-term tool completes, update risk neutralized amounts."""
+    neutralization = _RISK_NEUTRALIZATION.get(tool_name)
+    if not neutralization or not demo_state.economic_risk_assessment:
+        return
+
+    findings = demo_state.economic_risk_assessment.get("findings", [])
+    for finding in findings:
+        fname = finding.get("finding_name", "")
+        pct = neutralization.get(fname)
+        if pct is not None:
+            demo_state.risk_neutralized_usd_low += int(finding.get("risk_usd_low", 0) * pct)
+            demo_state.risk_neutralized_usd_high += int(finding.get("risk_usd_high", 0) * pct)
+
+    remaining_low = max(0, demo_state.total_risk_usd_low - demo_state.risk_neutralized_usd_low)
+    remaining_high = max(0, demo_state.total_risk_usd_high - demo_state.risk_neutralized_usd_high)
+
+    await event_queue.put({
+        "type": "risk_update",
+        "data": {
+            "neutralized_low": demo_state.risk_neutralized_usd_low,
+            "neutralized_high": demo_state.risk_neutralized_usd_high,
+            "remaining_low": remaining_low,
+            "remaining_high": remaining_high,
+        },
+    })
+
+    await event_queue.put({
+        "type": "economic_narration",
+        "data": {
+            "subtype": "impact",
+            "message": (
+                f"Mitigation active. ${demo_state.risk_neutralized_usd_low:,}\u2013"
+                f"${demo_state.risk_neutralized_usd_high:,} of risk neutralized. "
+                f"${remaining_low:,}\u2013${remaining_high:,} remains \u2014 "
+                "awaiting human decision on the fix."
+            ),
+        },
+    })
+
 # State mapping: which tool triggers which state transition
 TOOL_STATE_MAP = {
     "detect_latency_anomaly": AgentState.ANOMALY_DETECTED,
@@ -793,7 +1045,7 @@ TOOL_STATE_MAP = {
 
 SYSTEM_PROMPT = """You are an AI Site Reliability Engineer (SRE) agent monitoring the TradePulse trading platform.
 
-Your mission: Detect latency anomalies, stabilize the platform immediately, then investigate root causes and orchestrate a long-term fix.
+Your mission: Detect latency anomalies, quantify the business risk in dollars, stabilize the platform immediately, then investigate root causes and orchestrate a long-term fix.
 
 When production breaks, you operate on TWO TRACKS simultaneously:
 - SHORT-TERM: Stop the bleeding NOW (you act autonomously)
@@ -802,28 +1054,30 @@ When production breaks, you operate on TWO TRACKS simultaneously:
 Follow this exact sequence when you detect an issue:
 
 1. Use detect_latency_anomaly to check current p99 latency
+2. Use assess_economic_risk to translate the technical findings into dollar-denominated business risk BEFORE taking any action. Pass the p99_latency_ms, threshold_ms, and an estimated_minutes_to_breach (estimate based on current trajectory).
 
 ── SHORT-TERM TRACK (act immediately, no human approval needed) ──
 
-2. Use activate_price_cache to serve cached prices for immediate latency relief
-3. Use enable_load_shedding to limit concurrent pricing requests and prevent cascading failure
-4. Use switch_to_backup_pricing to switch to the more reliable backup data source
+3. Use activate_price_cache to serve cached prices for immediate latency relief
+4. Use enable_load_shedding to limit concurrent pricing requests and prevent cascading failure
+5. Use switch_to_backup_pricing to switch to the more reliable backup data source
 
 After all three: announce "Platform stabilized. Now investigating root cause."
 
 ── LONG-TERM TRACK (human-in-the-loop) ──
 
-5. Use create_pagerduty_incident to formally escalate (severity: "critical")
-6. Use investigate_github_source to retrieve trading-service/pricing_client.py
-7. Use identify_missing_patterns to analyze for missing resiliency patterns
-8. Use generate_optimized_code to produce an improved version with retry, circuit breaker, and timeout
-9. Use create_jira_ticket to document the incident, analysis, and proposed fix
-10. STOP and wait — a human must approve before you proceed
-11. After approval, use resolve_pagerduty_incident to close the incident
+6. Use create_pagerduty_incident to formally escalate (severity: "critical")
+7. Use investigate_github_source to retrieve trading-service/pricing_client.py
+8. Use identify_missing_patterns to analyze for missing resiliency patterns
+9. Use generate_optimized_code to produce an improved version with retry, circuit breaker, and timeout
+10. Use create_jira_ticket to document the incident, analysis, and proposed fix — include the dollar risk figures in the ticket description
+11. STOP and wait — a human must approve before you proceed
+12. After approval, use resolve_pagerduty_incident to close the incident
 
 Be thorough in your reasoning. Before each action, explain WHAT you are doing and WHY.
+Frame every decision in terms of business impact — use dollar figures from the risk assessment.
 When creating the PagerDuty incident, set severity to "critical" for latency breaches.
-When creating the Jira ticket, include the full incident context and the complete optimized code."""
+When creating the Jira ticket, include the full incident context, the economic risk assessment, and the complete optimized code."""
 
 USER_PROMPT = """Check the TradePulse trading service for latency anomalies. If you detect a problem, follow the full incident response workflow: escalate to PagerDuty, investigate the source code, analyze for missing patterns, generate a fix, and create a Jira ticket for human review."""
 
@@ -837,6 +1091,9 @@ async def run_agent(
     import anthropic
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
     start_time = time.monotonic()
+
+    # Build extended tool map with closures over demo_state and event_queue
+    tool_map = _build_tool_map(demo_state, event_queue)
 
     demo_state.transition(AgentState.MONITORING)
     await event_queue.put({
@@ -885,7 +1142,7 @@ async def run_agent(
                     })
 
                     # Execute the tool
-                    handler = TOOL_MAP.get(tool_name)
+                    handler = tool_map.get(tool_name)
                     if handler:
                         try:
                             result = await handler(tool_input)
@@ -915,6 +1172,10 @@ async def run_agent(
                             })
                         except ValueError:
                             pass  # Invalid transition — state already advanced
+
+                    # Update risk neutralization after short-term tools
+                    if tool_name in _RISK_NEUTRALIZATION:
+                        await _update_risk_neutralization(tool_name, demo_state, event_queue)
 
                     assistant_content.append(block)
                     tool_results.append({

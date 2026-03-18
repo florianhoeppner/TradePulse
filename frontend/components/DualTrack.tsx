@@ -1,14 +1,23 @@
 "use client";
 
 import { motion } from "framer-motion";
-import type { TimelineStepData } from "@/lib/types";
+import type { TimelineStepData, RiskNeutralized } from "@/lib/types";
 import TimelineStep from "./TimelineStep";
 
 interface DualTrackProps {
   steps: TimelineStepData[];
+  hasRiskAssessment?: boolean;
+  riskNeutralized?: RiskNeutralized | null;
 }
 
-export default function DualTrack({ steps }: DualTrackProps) {
+const usdCompact = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+  notation: "compact",
+  maximumFractionDigits: 0,
+});
+
+export default function DualTrack({ steps, hasRiskAssessment, riskNeutralized }: DualTrackProps) {
   const shortTermSteps = steps.filter((s) => s.track === "short-term");
   const longTermSteps = steps.filter((s) => s.track !== "short-term");
 
@@ -27,6 +36,9 @@ export default function DualTrack({ steps }: DualTrackProps) {
   const isAwaitingApproval = longTermSteps.some(
     (s) => s.id === "awaiting_approval" && s.status === "active"
   );
+
+  const showNeutralized = hasRiskAssessment && riskNeutralized && riskNeutralized.neutralized_low > 0;
+  const showRemaining = hasRiskAssessment && riskNeutralized && riskNeutralized.remaining_low > 0;
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -64,6 +76,21 @@ export default function DualTrack({ steps }: DualTrackProps) {
             </span>
           </motion.div>
         )}
+
+        {showNeutralized && (
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mt-3 px-3 py-2 rounded-md bg-accent-green/5 border border-accent-green/15"
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-gray-400">Risk neutralized:</span>
+              <span className="text-sm font-semibold text-accent-green font-mono">
+                {usdCompact.format(riskNeutralized!.neutralized_low)} – {usdCompact.format(riskNeutralized!.neutralized_high)}
+              </span>
+            </div>
+          </motion.div>
+        )}
       </div>
 
       {/* Right column: Long-term */}
@@ -93,6 +120,23 @@ export default function DualTrack({ steps }: DualTrackProps) {
               isLast={i === longTermSteps.length - 1}
             />
           ))
+        )}
+
+        {showRemaining && (
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            className={`mt-3 px-3 py-2 rounded-md bg-accent-amber/5 border border-accent-amber/20 ${
+              isAwaitingApproval ? "animate-pulse" : ""
+            }`}
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-gray-400">Open exposure:</span>
+              <span className="text-sm font-semibold text-accent-amber font-mono">
+                {usdCompact.format(riskNeutralized!.remaining_low)} – {usdCompact.format(riskNeutralized!.remaining_high)}
+              </span>
+            </div>
+          </motion.div>
         )}
       </div>
     </div>

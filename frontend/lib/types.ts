@@ -86,6 +86,36 @@ export interface MarketStatus {
   current_time_et: string;
 }
 
+export interface EconomicProfile {
+  avg_order_value_usd: number;
+  orders_per_minute: number;
+  sla_breach_penalty_usd: number;
+  downtime_cost_per_hour_usd: number;
+  currency: string;
+}
+
+export interface RiskFinding {
+  finding_name: string;
+  risk_usd_low: number;
+  risk_usd_high: number;
+  sla_relevant: boolean;
+  rationale: string;
+}
+
+export interface RiskTableData {
+  type: "risk_table";
+  findings: RiskFinding[];
+  total_low: number;
+  total_high: number;
+}
+
+export interface RiskNeutralized {
+  neutralized_low: number;
+  neutralized_high: number;
+  remaining_low: number;
+  remaining_high: number;
+}
+
 export interface PlatformStatus {
   cache: { active: boolean; age_seconds: number };
   load_shedding: { active: boolean; shed_count: number; queue_depth: number };

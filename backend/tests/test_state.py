@@ -106,6 +106,56 @@ class TestDemoState:
         assert ds.state == AgentState.INCIDENT_CREATED
 
 
+class TestEconomicProfile:
+    def test_default_economic_profile(self):
+        ds = DemoState()
+        assert ds.economic_profile["avg_order_value_usd"] == 8400
+        assert ds.economic_profile["orders_per_minute"] == 12
+        assert ds.economic_profile["sla_breach_penalty_usd"] == 250000
+        assert ds.economic_profile["downtime_cost_per_hour_usd"] == 6048000
+        assert ds.economic_profile["currency"] == "USD"
+
+    def test_default_risk_fields(self):
+        ds = DemoState()
+        assert ds.economic_risk_assessment is None
+        assert ds.total_risk_usd_low == 0
+        assert ds.total_risk_usd_high == 0
+        assert ds.risk_neutralized_usd_low == 0
+        assert ds.risk_neutralized_usd_high == 0
+
+    def test_reset_clears_risk_fields_but_preserves_profile(self):
+        ds = DemoState()
+        ds.economic_profile["avg_order_value_usd"] = 10000
+        ds.economic_risk_assessment = {"findings": []}
+        ds.total_risk_usd_low = 50000
+        ds.total_risk_usd_high = 100000
+        ds.risk_neutralized_usd_low = 30000
+        ds.risk_neutralized_usd_high = 60000
+        ds.transition(AgentState.MONITORING)
+
+        ds.reset()
+
+        # Profile persists
+        assert ds.economic_profile["avg_order_value_usd"] == 10000
+        # Risk fields cleared
+        assert ds.economic_risk_assessment is None
+        assert ds.total_risk_usd_low == 0
+        assert ds.total_risk_usd_high == 0
+        assert ds.risk_neutralized_usd_low == 0
+        assert ds.risk_neutralized_usd_high == 0
+
+    def test_to_dict_includes_economic_fields(self):
+        ds = DemoState()
+        d = ds.to_dict()
+        assert "economic_profile" in d
+        assert d["economic_profile"]["avg_order_value_usd"] == 8400
+        assert "economic_risk_assessment" in d
+        assert d["total_risk_usd_low"] == 0
+        assert d["total_risk_usd_high"] == 0
+        assert d["risk_neutralized_usd_low"] == 0
+        assert d["risk_neutralized_usd_high"] == 0
+
+
 class TestRunHistory:
     def test_record_and_get(self):
         rh = RunHistory()
