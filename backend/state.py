@@ -58,6 +58,20 @@ class DemoState:
         self.history: list[dict[str, Any]] = []
         self.run_data: dict[str, Any] = {}
         self._start_time: float | None = None
+        # Economic risk profile — persists across demo resets
+        self.economic_profile: dict[str, Any] = {
+            "avg_order_value_usd": 8400,
+            "orders_per_minute": 12,
+            "sla_breach_penalty_usd": 250000,
+            "downtime_cost_per_hour_usd": 6048000,
+            "currency": "USD",
+        }
+        # Economic risk assessment — populated by assess_economic_risk tool
+        self.economic_risk_assessment: dict[str, Any] | None = None
+        self.total_risk_usd_low: int = 0
+        self.total_risk_usd_high: int = 0
+        self.risk_neutralized_usd_low: int = 0
+        self.risk_neutralized_usd_high: int = 0
 
     def transition(self, new_state: AgentState, data: dict[str, Any] | None = None) -> None:
         """Transition to a new state. Validates the transition is legal."""
@@ -85,6 +99,12 @@ class DemoState:
         self.history = []
         self.run_data = {}
         self._start_time = None
+        # Clear economic risk assessment (but preserve economic_profile config)
+        self.economic_risk_assessment = None
+        self.total_risk_usd_low = 0
+        self.total_risk_usd_high = 0
+        self.risk_neutralized_usd_low = 0
+        self.risk_neutralized_usd_high = 0
 
     def to_dict(self) -> dict[str, Any]:
         """Return a serializable snapshot of current state."""
@@ -92,6 +112,12 @@ class DemoState:
             "state": self.state.value,
             "history": self.history,
             "run_data": self.run_data,
+            "economic_profile": self.economic_profile,
+            "economic_risk_assessment": self.economic_risk_assessment,
+            "total_risk_usd_low": self.total_risk_usd_low,
+            "total_risk_usd_high": self.total_risk_usd_high,
+            "risk_neutralized_usd_low": self.risk_neutralized_usd_low,
+            "risk_neutralized_usd_high": self.risk_neutralized_usd_high,
         }
 
 

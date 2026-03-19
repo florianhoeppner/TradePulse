@@ -15,7 +15,7 @@ from typing import AsyncGenerator
 logger = logging.getLogger("tradepulse.backend")
 
 import httpx
-from fastapi import FastAPI, BackgroundTasks
+from fastapi import FastAPI, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sse_starlette.sse import EventSourceResponse
@@ -405,6 +405,29 @@ async def admin_pricing_source(mode: str):
             status_code=502,
             content={"error": f"Failed to switch pricing source: {str(e)}"},
         )
+
+
+@app.get("/economic-profile")
+async def get_economic_profile():
+    """Return the current economic profile used for risk calculations."""
+    return demo_state.economic_profile
+
+
+@app.post("/economic-profile")
+async def set_economic_profile(request: Request):
+    """Update the economic profile used for risk calculations."""
+    body = await request.json()
+    allowed_keys = {
+        "avg_order_value_usd",
+        "orders_per_minute",
+        "sla_breach_penalty_usd",
+        "downtime_cost_per_hour_usd",
+        "currency",
+    }
+    for key, value in body.items():
+        if key in allowed_keys:
+            demo_state.economic_profile[key] = value
+    return demo_state.economic_profile
 
 
 @app.get("/admin/config")

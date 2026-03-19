@@ -11,6 +11,7 @@ import ApprovalCard from "@/components/ApprovalCard";
 import MetricsChart from "@/components/MetricsChart";
 import AgentThinking from "@/components/AgentThinking";
 import ImpactCounter from "@/components/ImpactCounter";
+import RiskTable from "@/components/RiskTable";
 
 
 export default function Dashboard() {
@@ -23,6 +24,8 @@ export default function Dashboard() {
     jiraUrl,
     originalCode,
     optimizedCode,
+    riskTable,
+    riskNeutralized,
   } = useAgentStreamContext();
 
   const { stocks, isStale } = useMarketData();
@@ -170,7 +173,20 @@ export default function Dashboard() {
               </div>
             )}
 
-            <DualTrack steps={steps} />
+            <DualTrack
+              steps={steps}
+              hasRiskAssessment={riskTable !== null}
+              riskNeutralized={riskNeutralized}
+            />
+
+            {/* Risk Table */}
+            {riskTable && (
+              <RiskTable
+                findings={riskTable.findings}
+                totalLow={riskTable.total_low}
+                totalHigh={riskTable.total_high}
+              />
+            )}
 
             {/* Approval Card */}
             {currentState === "awaiting_approval" && (
@@ -180,6 +196,8 @@ export default function Dashboard() {
                 optimizedCode={optimizedCode}
                 onApprove={handleApprove}
                 onReject={handleReject}
+                totalRiskLow={riskTable?.total_low}
+                totalRiskHigh={riskTable?.total_high}
               />
             )}
           </div>

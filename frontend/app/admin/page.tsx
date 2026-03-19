@@ -10,12 +10,17 @@ import {
   getConfig,
   getHistory,
   fetchPlatformStatus,
-  toggleCache,
-  toggleLoadShedding,
-  switchPricingSource,
+  getEconomicProfile,
+  saveEconomicProfile,
 } from "@/lib/api";
 import Navbar from "@/components/Navbar";
-import type { ConfigEntry, RunHistoryEntry, PlatformStatus } from "@/lib/types";
+import type { ConfigEntry, RunHistoryEntry, PlatformStatus, EconomicProfile } from "@/lib/types";
+
+const usdDisplay = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+  maximumFractionDigits: 0,
+});
 
 export default function AdminPage() {
   const { isConnected, currentState, resetStream } = useAgentStreamContext();
@@ -27,6 +32,16 @@ export default function AdminPage() {
   const [loading, setLoading] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
+  // Economic profile state
+  const [ecoProfile, setEcoProfile] = useState<EconomicProfile>({
+    avg_order_value_usd: 8400,
+    orders_per_minute: 12,
+    sla_breach_penalty_usd: 250000,
+    downtime_cost_per_hour_usd: 6048000,
+    currency: "USD",
+  });
+  const [ecoSaved, setEcoSaved] = useState(false);
+
   // Auto-dismiss error after 6 seconds
   useEffect(() => {
     if (!actionError) return;
@@ -37,11 +52,12 @@ export default function AdminPage() {
   const [configError, setConfigError] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
-    const [configRes, historyRes, chaosRes, platformRes] = await Promise.all([
+    const [configRes, historyRes, chaosRes, platformRes, ecoRes] = await Promise.all([
       getConfig(),
       getHistory(),
       getChaosStatus(),
       fetchPlatformStatus(),
+      getEconomicProfile(),
     ]);
     if (chaosRes.ok && chaosRes.data) {
       setChaosEnabled((chaosRes.data as { chaos_mode: boolean }).chaos_mode);
@@ -61,6 +77,9 @@ export default function AdminPage() {
     }
     if (platformRes.ok && platformRes.data) {
       setPlatformStatus(platformRes.data as PlatformStatus);
+    }
+    if (ecoRes.ok && ecoRes.data) {
+      setEcoProfile(ecoRes.data as EconomicProfile);
     }
   }, []);
 
@@ -112,6 +131,7 @@ export default function AdminPage() {
   const handleCacheToggle = async () => {
     setLoading("cache");
     setActionError(null);
+    const { toggleCache } = await import("@/lib/api");
     const newState = !(platformStatus?.cache.active ?? false);
     const res = await toggleCache(newState);
     setLoading(null);
@@ -124,6 +144,7 @@ export default function AdminPage() {
   const handleLoadSheddingToggle = async () => {
     setLoading("loadshed");
     setActionError(null);
+    const { toggleLoadShedding } = await import("@/lib/api");
     const newState = !(platformStatus?.load_shedding.active ?? false);
     const res = await toggleLoadShedding(newState);
     setLoading(null);
@@ -136,6 +157,7 @@ export default function AdminPage() {
   const handlePricingSourceToggle = async () => {
     setLoading("pricing");
     setActionError(null);
+    const { switchPricingSource } = await import("@/lib/api");
     const switchToBackup = platformStatus?.pricing_source !== "backup";
     const res = await switchPricingSource(switchToBackup);
     setLoading(null);
@@ -144,6 +166,21 @@ export default function AdminPage() {
     }
     await loadData();
   };
+
+  const handleSaveProfile = async () => {
+    setLoading("eco");
+    setActionError(null);
+    const res = await saveEconomicProfile(ecoProfile);
+    setLoading(null);
+    if (!res.ok) {
+      setActionError(res.error ?? "Failed to save economic profile");
+    } else {
+      setEcoSaved(true);
+      setTimeout(() => setEcoSaved(false), 2000);
+    }
+  };
+
+  const revenueAtRisk = ecoProfile.avg_order_value_usd * ecoProfile.orders_per_minute;
 
   return (
     <div className="min-h-screen">
@@ -171,6 +208,86 @@ export default function AdminPage() {
         )}
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {/* Economic Profile — above Platform State */}
+          <div className="bg-navy-800/50 border border-navy-700 rounded-lg p-5 md:col-span-2 lg:col-span-3">
+            <h3 className="text-sm font-semibold text-gray-300 mb-1 uppercase tracking-wider">
+              Economic Profile
+            </h3>
+            <p className="text-xs text-gray-500 mb-4">
+              These numbers are used by the agent to quantify risk during the demo. Set them once before presenting.
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div>
+                <label className="block text-xs text-gray-400 mb-1">Avg order value</label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">$</span>
+                  <input
+                    type="number"
+                    value={ecoProfile.avg_order_value_usd}
+                    onChange={(e) =>
+                      setEcoProfile((p) => ({ ...p, avg_order_value_usd: Number(e.target.value) || 0 }))
+                    }
+                    className="w-full pl-7 pr-3 py-2 rounded-md bg-navy-900/50 border border-navy-600 text-white text-sm font-mono focus:outline-none focus:border-accent-blue"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs text-gray-400 mb-1">Orders per minute</label>
+                <input
+                  type="number"
+                  value={ecoProfile.orders_per_minute}
+                  onChange={(e) =>
+                    setEcoProfile((p) => ({ ...p, orders_per_minute: Number(e.target.value) || 0 }))
+                  }
+                  className="w-full px-3 py-2 rounded-md bg-navy-900/50 border border-navy-600 text-white text-sm font-mono focus:outline-none focus:border-accent-blue"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-400 mb-1">SLA breach penalty</label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">$</span>
+                  <input
+                    type="number"
+                    value={ecoProfile.sla_breach_penalty_usd}
+                    onChange={(e) =>
+                      setEcoProfile((p) => ({ ...p, sla_breach_penalty_usd: Number(e.target.value) || 0 }))
+                    }
+                    className="w-full pl-7 pr-3 py-2 rounded-md bg-navy-900/50 border border-navy-600 text-white text-sm font-mono focus:outline-none focus:border-accent-blue"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs text-gray-400 mb-1">Downtime cost/hour</label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">$</span>
+                  <input
+                    type="number"
+                    value={ecoProfile.downtime_cost_per_hour_usd}
+                    onChange={(e) =>
+                      setEcoProfile((p) => ({ ...p, downtime_cost_per_hour_usd: Number(e.target.value) || 0 }))
+                    }
+                    className="w-full pl-7 pr-3 py-2 rounded-md bg-navy-900/50 border border-navy-600 text-white text-sm font-mono focus:outline-none focus:border-accent-blue"
+                  />
+                </div>
+              </div>
+            </div>
+            <div className="flex items-center justify-between mt-4">
+              <div className="text-sm text-gray-400">
+                Revenue at risk/min:{" "}
+                <span className="text-white font-semibold font-mono">
+                  {usdDisplay.format(revenueAtRisk)}
+                </span>
+              </div>
+              <button
+                onClick={handleSaveProfile}
+                disabled={loading === "eco"}
+                className="px-4 py-2 rounded-md bg-accent-blue/20 text-accent-blue border border-accent-blue/30 hover:bg-accent-blue/30 font-medium text-sm transition-colors disabled:opacity-50"
+              >
+                {loading === "eco" ? "Saving..." : ecoSaved ? "Saved \u2713" : "Save Profile"}
+              </button>
+            </div>
+          </div>
+
           {/* Platform State */}
           <div className="bg-navy-800/50 border border-navy-700 rounded-lg p-5 md:col-span-2 lg:col-span-3">
             <h3 className="text-sm font-semibold text-gray-300 mb-4 uppercase tracking-wider">

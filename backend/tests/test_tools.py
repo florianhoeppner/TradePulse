@@ -1,12 +1,15 @@
 """Tests for the TradePulse Agent Tool functions."""
 
+import asyncio
 import json
 import pytest
 import respx
 import httpx
+from unittest.mock import patch, MagicMock
 
 from agent import (
     tool_detect_latency_anomaly,
+    tool_assess_economic_risk,
     tool_create_pagerduty_incident,
     tool_investigate_github_source,
     tool_identify_missing_patterns,
@@ -16,8 +19,10 @@ from agent import (
     tool_activate_price_cache,
     tool_enable_load_shedding,
     tool_switch_to_backup_pricing,
+    _update_risk_neutralization,
     TOOLS,
 )
+from state import DemoState
 
 
 class TestToolDefinitions:
@@ -27,13 +32,14 @@ class TestToolDefinitions:
             assert "description" in tool
             assert "input_schema" in tool
 
-    def test_ten_tools_defined(self):
-        assert len(TOOLS) == 10
+    def test_eleven_tools_defined(self):
+        assert len(TOOLS) == 11
 
     def test_tool_names(self):
         names = {t["name"] for t in TOOLS}
         expected = {
             "detect_latency_anomaly",
+            "assess_economic_risk",
             "create_pagerduty_incident",
             "investigate_github_source",
             "identify_missing_patterns",
@@ -350,3 +356,182 @@ class TestSwitchToBackupPricing:
         )
         result = await tool_switch_to_backup_pricing()
         assert "error" in result
+
+
+class TestAssessEconomicRisk:
+    @pytest.mark.asyncio
+    async def test_fallback_when_claude_unavailable(self):
+        """When Claude API is unavailable, uses deterministic fallback."""
+        ds = DemoState()
+        eq = asyncio.Queue()
+
+        with patch("agent.ANTHROPIC_API_KEY", ""):
+            result = await tool_assess_economic_risk(
+                demo_state=ds,
+                event_queue=eq,
+                p99_latency_ms=3200,
+                threshold_ms=2000,
+                estimated_minutes_to_breach=5.0,
+            )
+
+        assert "risk_table" in result
+        assert result["total_risk_usd_low"] > 0
+        assert result["total_risk_usd_high"] > result["total_risk_usd_low"]
+        assert result["revenue_at_risk_per_minute"] == 8400 * 12
+
+        # Verify state was updated
+        assert ds.total_risk_usd_low == result["total_risk_usd_low"]
+        assert ds.total_risk_usd_high == result["total_risk_usd_high"]
+        assert ds.economic_risk_assessment is not None
+
+    @pytest.mark.asyncio
+    async def test_emits_narration_events(self):
+        """Tool emits thinking, action, risk_table, and impact events."""
+        ds = DemoState()
+        eq = asyncio.Queue()
+
+        with patch("agent.ANTHROPIC_API_KEY", ""):
+            await tool_assess_economic_risk(
+                demo_state=ds,
+                event_queue=eq,
+                p99_latency_ms=3200,
+                threshold_ms=2000,
+            )
+
+        events = []
+        while not eq.empty():
+            events.append(await eq.get())
+
+        event_types = [e["type"] for e in events]
+        assert "economic_narration" in event_types
+        assert "risk_table" in event_types
+
+        # Check subtypes
+        narrations = [e for e in events if e["type"] == "economic_narration"]
+        subtypes = {n["data"]["subtype"] for n in narrations}
+        assert "thinking" in subtypes
+        assert "action" in subtypes
+        assert "impact" in subtypes
+
+    @pytest.mark.asyncio
+    async def test_risk_table_structure(self):
+        """Risk table has correct structure."""
+        ds = DemoState()
+        eq = asyncio.Queue()
+
+        with patch("agent.ANTHROPIC_API_KEY", ""):
+            result = await tool_assess_economic_risk(
+                demo_state=ds,
+                event_queue=eq,
+                p99_latency_ms=3200,
+                threshold_ms=2000,
+            )
+
+        table = result["risk_table"]
+        assert table["type"] == "risk_table"
+        assert len(table["findings"]) == 4
+        assert table["total_low"] > 0
+        assert table["total_high"] > 0
+
+        finding_names = {f["finding_name"] for f in table["findings"]}
+        assert finding_names == {
+            "latency_spike",
+            "pricing_source_degradation",
+            "queue_depth_buildup",
+            "cache_miss_rate",
+        }
+
+    @pytest.mark.asyncio
+    async def test_with_custom_economic_profile(self):
+        """Tool uses custom economic profile values."""
+        ds = DemoState()
+        ds.economic_profile["avg_order_value_usd"] = 20000
+        ds.economic_profile["orders_per_minute"] = 50
+        eq = asyncio.Queue()
+
+        with patch("agent.ANTHROPIC_API_KEY", ""):
+            result = await tool_assess_economic_risk(
+                demo_state=ds,
+                event_queue=eq,
+                p99_latency_ms=3200,
+                threshold_ms=2000,
+            )
+
+        assert result["revenue_at_risk_per_minute"] == 20000 * 50
+
+
+class TestRiskNeutralization:
+    @pytest.mark.asyncio
+    async def test_cache_neutralizes_latency_risk(self):
+        """activate_price_cache neutralizes 60% of latency_spike risk."""
+        ds = DemoState()
+        ds.economic_risk_assessment = {
+            "findings": [
+                {"finding_name": "latency_spike", "risk_usd_low": 400000, "risk_usd_high": 650000, "sla_relevant": True},
+                {"finding_name": "pricing_source_degradation", "risk_usd_low": 80000, "risk_usd_high": 120000, "sla_relevant": True},
+            ]
+        }
+        ds.total_risk_usd_low = 480000
+        ds.total_risk_usd_high = 770000
+        eq = asyncio.Queue()
+
+        await _update_risk_neutralization("activate_price_cache", ds, eq)
+
+        assert ds.risk_neutralized_usd_low == 240000  # 60% of 400K
+        assert ds.risk_neutralized_usd_high == 390000  # 60% of 650K
+
+    @pytest.mark.asyncio
+    async def test_backup_pricing_neutralizes_degradation_fully(self):
+        """switch_to_backup_pricing neutralizes 100% of pricing_source_degradation."""
+        ds = DemoState()
+        ds.economic_risk_assessment = {
+            "findings": [
+                {"finding_name": "pricing_source_degradation", "risk_usd_low": 80000, "risk_usd_high": 120000, "sla_relevant": True},
+            ]
+        }
+        ds.total_risk_usd_low = 80000
+        ds.total_risk_usd_high = 120000
+        eq = asyncio.Queue()
+
+        await _update_risk_neutralization("switch_to_backup_pricing", ds, eq)
+
+        assert ds.risk_neutralized_usd_low == 80000
+        assert ds.risk_neutralized_usd_high == 120000
+
+    @pytest.mark.asyncio
+    async def test_emits_risk_update_event(self):
+        """Neutralization emits risk_update and economic_narration events."""
+        ds = DemoState()
+        ds.economic_risk_assessment = {
+            "findings": [
+                {"finding_name": "latency_spike", "risk_usd_low": 400000, "risk_usd_high": 650000, "sla_relevant": True},
+            ]
+        }
+        ds.total_risk_usd_low = 400000
+        ds.total_risk_usd_high = 650000
+        eq = asyncio.Queue()
+
+        await _update_risk_neutralization("activate_price_cache", ds, eq)
+
+        events = []
+        while not eq.empty():
+            events.append(await eq.get())
+
+        types = [e["type"] for e in events]
+        assert "risk_update" in types
+        assert "economic_narration" in types
+
+        risk_update = next(e for e in events if e["type"] == "risk_update")
+        assert risk_update["data"]["neutralized_low"] == 240000
+        assert risk_update["data"]["remaining_low"] == 160000
+
+    @pytest.mark.asyncio
+    async def test_no_update_without_assessment(self):
+        """Does nothing if no risk assessment has been done."""
+        ds = DemoState()
+        eq = asyncio.Queue()
+
+        await _update_risk_neutralization("activate_price_cache", ds, eq)
+
+        assert eq.empty()
+        assert ds.risk_neutralized_usd_low == 0

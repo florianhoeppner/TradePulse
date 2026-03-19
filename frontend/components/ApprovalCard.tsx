@@ -9,7 +9,22 @@ interface ApprovalCardProps {
   optimizedCode: string;
   onApprove: () => Promise<void>;
   onReject: () => Promise<void>;
+  totalRiskLow?: number;
+  totalRiskHigh?: number;
 }
+
+const usdFull = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+  maximumFractionDigits: 0,
+});
+
+const usdCompact = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+  notation: "compact",
+  maximumFractionDigits: 1,
+});
 
 export default function ApprovalCard({
   jiraUrl,
@@ -17,6 +32,8 @@ export default function ApprovalCard({
   optimizedCode,
   onApprove,
   onReject,
+  totalRiskLow,
+  totalRiskHigh,
 }: ApprovalCardProps) {
   const [showDiff, setShowDiff] = useState(false);
   const [loading, setLoading] = useState<"approve" | "reject" | null>(null);
@@ -33,6 +50,10 @@ export default function ApprovalCard({
     setLoading(null);
   };
 
+  const hasRiskData = totalRiskLow != null && totalRiskHigh != null && totalRiskHigh > 0;
+  const projectedLow = hasRiskData ? totalRiskLow! * 2 * 12 : 0;
+  const projectedHigh = hasRiskData ? totalRiskHigh! * 3 * 12 : 0;
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -46,6 +67,43 @@ export default function ApprovalCard({
         The AI agent has identified missing resiliency patterns and generated a
         fix. Review and approve to resolve the incident.
       </p>
+
+      {/* Business Case */}
+      {hasRiskData && (
+        <div className="mb-5 rounded-lg bg-navy-900/70 border border-navy-600 p-4">
+          <h4 className="text-xs font-semibold uppercase tracking-wider text-gray-300 mb-3">
+            Business Case for This Fix
+          </h4>
+          <div className="space-y-2">
+            <div className="flex justify-between items-center">
+              <span className="text-sm text-gray-400">Risk per incident (unmitigated)</span>
+              <span className="text-sm font-semibold text-white font-mono">
+                {usdCompact.format(totalRiskLow!)} – {usdCompact.format(totalRiskHigh!)}
+              </span>
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="text-sm text-gray-400">Est. recurrence without fix</span>
+              <span className="text-sm font-semibold text-accent-amber font-mono">
+                2–3x / month
+              </span>
+            </div>
+            <div className="border-t border-navy-600 pt-2 mt-2">
+              <div className="flex justify-between items-center">
+                <span className="text-sm text-gray-400">Projected 12-month exposure</span>
+                <span className="text-2xl font-bold text-white font-mono">
+                  {usdCompact.format(projectedLow)} – {usdCompact.format(projectedHigh)}
+                </span>
+              </div>
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="text-sm text-gray-400">Cost of this fix</span>
+              <span className="text-sm font-semibold text-accent-green font-mono">
+                1 engineer-day
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
 
       {jiraUrl && (
         <a
@@ -64,7 +122,7 @@ export default function ApprovalCard({
           onClick={() => setShowDiff(!showDiff)}
           className="text-sm px-3 py-1 rounded border border-navy-600 text-gray-300 hover:bg-navy-700 transition-colors"
         >
-          {showDiff ? "Hide Code Diff" : "View Code Diff"}
+          {showDiff ? "Hide Technical Diff" : "View Technical Diff"}
         </button>
       </div>
 

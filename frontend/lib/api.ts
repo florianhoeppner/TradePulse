@@ -107,4 +107,15 @@ export function switchPricingSource(backup: boolean) {
   });
 }
 
+export function getEconomicProfile() {
+  return apiCall("/economic-profile");
+}
+
+export function saveEconomicProfile(profile: import("./types").EconomicProfile) {
+  return apiCall("/economic-profile", {
+    method: "POST",
+    body: JSON.stringify(profile),
+  });
+}
+
 export { BACKEND_URL };

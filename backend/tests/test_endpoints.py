@@ -189,6 +189,80 @@ class TestAdminChaos:
         assert response.status_code == 502
 
 
+# --- Economic Profile ---
+
+
+class TestEconomicProfile:
+    @pytest.mark.asyncio
+    async def test_get_default_profile(self, transport):
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.get("/economic-profile")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["avg_order_value_usd"] == 8400
+        assert data["orders_per_minute"] == 12
+        assert data["sla_breach_penalty_usd"] == 250000
+        assert data["currency"] == "USD"
+
+    @pytest.mark.asyncio
+    async def test_post_updates_profile(self, transport):
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.post(
+                "/economic-profile",
+                json={"avg_order_value_usd": 10000, "orders_per_minute": 20},
+            )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["avg_order_value_usd"] == 10000
+        assert data["orders_per_minute"] == 20
+        # Unchanged fields retain defaults
+        assert data["sla_breach_penalty_usd"] == 250000
+
+    @pytest.mark.asyncio
+    async def test_post_ignores_unknown_keys(self, transport):
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.post(
+                "/economic-profile",
+                json={"unknown_field": 999, "avg_order_value_usd": 5000},
+            )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["avg_order_value_usd"] == 5000
+        assert "unknown_field" not in data
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_profile_persists_after_reset(self, transport):
+        """Economic profile survives demo reset."""
+        # Set custom profile
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            await client.post(
+                "/economic-profile",
+                json={"avg_order_value_usd": 15000},
+            )
+
+        # Reset demo
+        respx.post(f"{TRADING_BASE}/chaos/disable").mock(
+            return_value=Response(200, json={"chaos_mode": False})
+        )
+        respx.post(f"{TRADING_BASE}/admin/cache/deactivate").mock(
+            return_value=Response(200, json={"cache_active": False})
+        )
+        respx.post(f"{TRADING_BASE}/admin/load-shedding/deactivate").mock(
+            return_value=Response(200, json={"load_shedding_active": False})
+        )
+        respx.post(f"{TRADING_BASE}/admin/pricing-source/primary").mock(
+            return_value=Response(200, json={"pricing_source": "primary"})
+        )
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            await client.post("/admin/reset")
+
+        # Verify profile persisted
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.get("/economic-profile")
+        assert response.json()["avg_order_value_usd"] == 15000
+
+
 # --- Market Proxy Endpoints ---
 
 
