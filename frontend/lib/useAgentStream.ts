@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { BACKEND_URL } from "./api";
+import { BACKEND_URL, fetchMetricsSummary } from "./api";
 import type {
   AgentState,
   TimelineStepData,
@@ -114,33 +114,29 @@ export function useAgentStream() {
   }, []);
 
   // Poll live p99 latency from trading service so the chart/gauge
-  // shows data even before the agent runs
+  // shows data even before the agent runs.
+  // Uses a ref-based interval to avoid dependency issues.
+  const metricsIntervalRef = useRef<NodeJS.Timeout | null>(null);
   useEffect(() => {
-    let cancelled = false;
     const poll = async () => {
-      try {
-        const res = await fetch(`${BACKEND_URL}/admin/metrics-summary`, {
-          headers: { "Content-Type": "application/json" },
-        });
-        if (!cancelled && res.ok) {
-          const data = await res.json();
-          const p99 = data.p99_latency_ms;
-          if (p99 != null && typeof p99 === "number") {
-            setMetrics((prev) => [
-              ...prev,
-              { time: Date.now(), value: p99 },
-            ]);
-          }
+      const res = await fetchMetricsSummary();
+      if (res.ok && res.data) {
+        const p99 = (res.data as { p99_latency_ms?: number }).p99_latency_ms;
+        if (p99 != null && typeof p99 === "number") {
+          setMetrics((prev) => {
+            // Cap at 100 points to prevent unbounded growth
+            const next = [...prev, { time: Date.now(), value: p99 }];
+            return next.length > 100 ? next.slice(-100) : next;
+          });
         }
-      } catch {
-        // Silently ignore — health check handles connectivity
       }
     };
     poll();
-    const intervalId = setInterval(poll, 5000);
+    metricsIntervalRef.current = setInterval(poll, 5000);
     return () => {
-      cancelled = true;
-      clearInterval(intervalId);
+      if (metricsIntervalRef.current) {
+        clearInterval(metricsIntervalRef.current);
+      }
     };
   }, []);
 
