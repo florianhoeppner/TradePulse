@@ -113,6 +113,37 @@ export function useAgentStream() {
     return () => clearInterval(intervalId);
   }, []);
 
+  // Poll live p99 latency from trading service so the chart/gauge
+  // shows data even before the agent runs
+  useEffect(() => {
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const res = await fetch(`${BACKEND_URL}/admin/metrics-summary`, {
+          headers: { "Content-Type": "application/json" },
+        });
+        if (!cancelled && res.ok) {
+          const data = await res.json();
+          const p99 = data.p99_latency_ms;
+          if (p99 != null && typeof p99 === "number") {
+            setMetrics((prev) => [
+              ...prev,
+              { time: Date.now(), value: p99 },
+            ]);
+          }
+        }
+      } catch {
+        // Silently ignore — health check handles connectivity
+      }
+    };
+    poll();
+    const intervalId = setInterval(poll, 5000);
+    return () => {
+      cancelled = true;
+      clearInterval(intervalId);
+    };
+  }, []);
+
   const addConsoleEntry = useCallback(
     (type: ConsoleEntry["type"], data: Record<string, unknown>) => {
       setConsoleLog((prev) => [
