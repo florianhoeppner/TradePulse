@@ -118,4 +118,8 @@ export function saveEconomicProfile(profile: import("./types").EconomicProfile) 
   });
 }
 
+export function fetchMetricsSummary() {
+  return apiCall("/admin/metrics-summary");
+}
+
 export { BACKEND_URL };

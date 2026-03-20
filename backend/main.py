@@ -430,6 +430,20 @@ async def set_economic_profile(request: Request):
     return demo_state.economic_profile
 
 
+@app.get("/admin/metrics-summary")
+async def admin_metrics_summary():
+    """Proxy metrics summary from the trading service (p99 latency, sample count, etc.)."""
+    try:
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+            response = await client.get(f"{TRADING_SERVICE_URL}/metrics/summary")
+            return response.json()
+    except Exception as e:
+        return JSONResponse(
+            status_code=502,
+            content={"error": f"Failed to fetch metrics summary: {str(e)}"},
+        )
+
+
 @app.get("/admin/config")
 async def admin_config():
     """Return environment variable names (not values) and their configuration status."""
