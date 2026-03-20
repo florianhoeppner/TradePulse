@@ -12,6 +12,7 @@ import {
   fetchPlatformStatus,
   getEconomicProfile,
   saveEconomicProfile,
+  fetchMetricsSummary,
 } from "@/lib/api";
 import Navbar from "@/components/Navbar";
 import type { ConfigEntry, RunHistoryEntry, PlatformStatus, EconomicProfile } from "@/lib/types";
@@ -41,6 +42,34 @@ export default function AdminPage() {
     currency: "USD",
   });
   const [ecoSaved, setEcoSaved] = useState(false);
+
+  // Chaos warmup state
+  const [chaosP99, setChaosP99] = useState<number | null>(null);
+  const [chaosSamples, setChaosSamples] = useState<number | null>(null);
+
+  // Poll metrics summary when chaos is enabled to show warmup status
+  useEffect(() => {
+    if (!chaosEnabled) {
+      setChaosP99(null);
+      setChaosSamples(null);
+      return;
+    }
+    let cancelled = false;
+    const poll = async () => {
+      const res = await fetchMetricsSummary();
+      if (!cancelled && res.ok && res.data) {
+        const d = res.data as { p99_latency_ms: number; total_orders: number };
+        setChaosP99(d.p99_latency_ms ?? 0);
+        setChaosSamples(d.total_orders ?? 0);
+      }
+    };
+    poll();
+    const interval = setInterval(poll, 5000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [chaosEnabled]);
 
   // Auto-dismiss error after 6 seconds
   useEffect(() => {
@@ -392,32 +421,57 @@ export default function AdminPage() {
               </div>
 
               {/* Chaos Mode (moved here for grouping) */}
-              <div className="flex items-center justify-between bg-navy-900/50 rounded p-3">
-                <div>
-                  <span className="text-xs text-gray-400">Chaos Mode</span>
-                  <div className="mt-1">
-                    <span
-                      className={`text-xs font-mono px-1.5 py-0.5 rounded ${
-                        chaosEnabled
-                          ? "text-accent-red bg-accent-red/10"
-                          : "text-gray-500 bg-navy-700"
-                      }`}
-                    >
-                      {chaosEnabled ? "ON" : "OFF"}
-                    </span>
+              <div className="bg-navy-900/50 rounded p-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="text-xs text-gray-400">Chaos Mode</span>
+                    <div className="mt-1">
+                      <span
+                        className={`text-xs font-mono px-1.5 py-0.5 rounded ${
+                          chaosEnabled
+                            ? "text-accent-red bg-accent-red/10"
+                            : "text-gray-500 bg-navy-700"
+                        }`}
+                      >
+                        {chaosEnabled ? "ON" : "OFF"}
+                      </span>
+                    </div>
                   </div>
+                  <button
+                    onClick={handleChaosToggle}
+                    disabled={loading === "chaos"}
+                    className="text-xs px-2 py-1 rounded border border-navy-600 text-gray-400 hover:text-white hover:border-navy-500 disabled:opacity-50"
+                  >
+                    {loading === "chaos"
+                      ? "..."
+                      : chaosEnabled
+                      ? "Disable"
+                      : "Enable"}
+                  </button>
                 </div>
-                <button
-                  onClick={handleChaosToggle}
-                  disabled={loading === "chaos"}
-                  className="text-xs px-2 py-1 rounded border border-navy-600 text-gray-400 hover:text-white hover:border-navy-500 disabled:opacity-50"
-                >
-                  {loading === "chaos"
-                    ? "..."
-                    : chaosEnabled
-                    ? "Disable"
-                    : "Enable"}
-                </button>
+                {chaosEnabled && chaosP99 !== null && (
+                  <div className="mt-2 pt-2 border-t border-navy-700">
+                    {chaosP99 < 2000 ? (
+                      <div className="animate-pulse">
+                        <span className="text-xs text-accent-amber font-medium">
+                          Warming up...
+                        </span>
+                        <span className="text-xs text-gray-400 ml-1 font-mono">
+                          p99: {Math.round(chaosP99)}ms (need &gt;2000ms)
+                        </span>
+                      </div>
+                    ) : (
+                      <div>
+                        <span className="text-xs text-accent-green font-medium">
+                          Ready
+                        </span>
+                        <span className="text-xs text-gray-400 ml-1 font-mono">
+                          p99: {Math.round(chaosP99)}ms
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           </div>

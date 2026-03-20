@@ -402,6 +402,31 @@ class TestPlatformStatusProxy:
         assert response.status_code == 502
 
 
+class TestMetricsSummaryProxy:
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_returns_metrics_summary(self, transport):
+        sample = {"p99_latency_ms": 3200.0, "total_orders": 150, "chaos_mode": True}
+        respx.get(f"{TRADING_BASE}/metrics/summary").mock(
+            return_value=Response(200, json=sample)
+        )
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.get("/admin/metrics-summary")
+        assert response.status_code == 200
+        assert response.json() == sample
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_trading_service_down(self, transport):
+        respx.get(f"{TRADING_BASE}/metrics/summary").mock(
+            side_effect=Exception("connection refused")
+        )
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.get("/admin/metrics-summary")
+        assert response.status_code == 502
+        assert "error" in response.json()
+
+
 class TestCacheProxy:
     @pytest.mark.asyncio
     @respx.mock

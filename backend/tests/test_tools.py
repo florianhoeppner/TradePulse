@@ -442,6 +442,106 @@ class TestAssessEconomicRisk:
         }
 
     @pytest.mark.asyncio
+    async def test_fallback_when_claude_returns_empty_findings(self):
+        """When Claude returns empty findings, uses deterministic fallback."""
+        ds = DemoState()
+        eq = asyncio.Queue()
+
+        # Mock Claude returning valid JSON but with empty findings
+        mock_response = MagicMock()
+        mock_response.content = [MagicMock(text='{"findings": []}')]
+
+        import anthropic as anthropic_mod
+        with patch("agent.ANTHROPIC_API_KEY", "test-key"), \
+             patch.object(anthropic_mod, "Anthropic") as mock_anthropic:
+            mock_client = MagicMock()
+            mock_client.messages.create.return_value = mock_response
+            mock_anthropic.return_value = mock_client
+
+            result = await tool_assess_economic_risk(
+                demo_state=ds,
+                event_queue=eq,
+                p99_latency_ms=3200,
+                threshold_ms=2000,
+                estimated_minutes_to_breach=5.0,
+            )
+
+        # Should have used fallback — 4 findings with meaningful risk
+        assert len(result["risk_table"]["findings"]) == 4
+        assert result["total_risk_usd_low"] > 0
+        assert result["total_risk_usd_high"] > 0
+
+    @pytest.mark.asyncio
+    async def test_fallback_when_claude_returns_zero_risk(self):
+        """When Claude returns all-zero risk findings, uses deterministic fallback."""
+        ds = DemoState()
+        eq = asyncio.Queue()
+
+        zero_findings = json.dumps({"findings": [
+            {"finding_name": "latency_spike", "risk_usd_low": 0, "risk_usd_high": 0, "sla_relevant": True, "rationale": "No risk"},
+            {"finding_name": "pricing_source_degradation", "risk_usd_low": 0, "risk_usd_high": 0, "sla_relevant": True, "rationale": "No risk"},
+        ]})
+        mock_response = MagicMock()
+        mock_response.content = [MagicMock(text=zero_findings)]
+
+        import anthropic as anthropic_mod
+        with patch("agent.ANTHROPIC_API_KEY", "test-key"), \
+             patch.object(anthropic_mod, "Anthropic") as mock_anthropic:
+            mock_client = MagicMock()
+            mock_client.messages.create.return_value = mock_response
+            mock_anthropic.return_value = mock_client
+
+            result = await tool_assess_economic_risk(
+                demo_state=ds,
+                event_queue=eq,
+                p99_latency_ms=3200,
+                threshold_ms=2000,
+                estimated_minutes_to_breach=5.0,
+            )
+
+        assert len(result["risk_table"]["findings"]) == 4
+        assert result["total_risk_usd_low"] > 0
+
+    @pytest.mark.asyncio
+    async def test_sla_relevant_string_coercion(self):
+        """Coerces sla_relevant from string 'true'/'false' to boolean."""
+        ds = DemoState()
+        eq = asyncio.Queue()
+
+        findings_with_strings = json.dumps({"findings": [
+            {"finding_name": "latency_spike", "risk_usd_low": 300000, "risk_usd_high": 600000, "sla_relevant": "true", "rationale": "High risk"},
+            {"finding_name": "pricing_source_degradation", "risk_usd_low": 80000, "risk_usd_high": 120000, "sla_relevant": "false", "rationale": "Low risk"},
+            {"finding_name": "queue_depth_buildup", "risk_usd_low": 0, "risk_usd_high": 15000, "sla_relevant": "false", "rationale": "Negligible"},
+            {"finding_name": "cache_miss_rate", "risk_usd_low": 0, "risk_usd_high": 0, "sla_relevant": "false", "rationale": "None"},
+        ]})
+        mock_response = MagicMock()
+        mock_response.content = [MagicMock(text=findings_with_strings)]
+
+        import anthropic as anthropic_mod
+        with patch("agent.ANTHROPIC_API_KEY", "test-key"), \
+             patch.object(anthropic_mod, "Anthropic") as mock_anthropic:
+            mock_client = MagicMock()
+            mock_client.messages.create.return_value = mock_response
+            mock_anthropic.return_value = mock_client
+
+            result = await tool_assess_economic_risk(
+                demo_state=ds,
+                event_queue=eq,
+                p99_latency_ms=3200,
+                threshold_ms=2000,
+                estimated_minutes_to_breach=5.0,
+            )
+
+        # Only sla_relevant=True (coerced from "true") should count toward totals
+        assert result["total_risk_usd_low"] == 300000
+        assert result["total_risk_usd_high"] == 600000
+
+        # Verify coercion happened
+        findings = result["risk_table"]["findings"]
+        assert findings[0]["sla_relevant"] is True
+        assert findings[1]["sla_relevant"] is False
+
+    @pytest.mark.asyncio
     async def test_with_custom_economic_profile(self):
         """Tool uses custom economic profile values."""
         ds = DemoState()
