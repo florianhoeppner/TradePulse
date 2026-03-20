@@ -7,12 +7,14 @@ interface ImpactCounterProps {
   metrics: MetricsDataPoint[];
   threshold?: number;
   isIncident: boolean;
+  revenuePerMinute?: number | null;
 }
 
 export default function ImpactCounter({
   metrics,
   threshold = 2000,
   isIncident,
+  revenuePerMinute,
 }: ImpactCounterProps) {
   const [estimatedLoss, setEstimatedLoss] = useState(0);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -27,13 +29,14 @@ export default function ImpactCounter({
       return;
     }
 
-    // During incident: accumulate losses based on how far above threshold
+    // During incident: accumulate losses per second while latency exceeds threshold
     intervalRef.current = setInterval(() => {
       const latest = metrics[metrics.length - 1];
       if (latest && latest.value > threshold) {
-        const excessMs = latest.value - threshold;
-        // Rough model: excess latency × trades/min × avg spread = $ impact
-        const increment = (excessMs / 1000) * 30 * (Math.random() * 0.5 + 0.5);
+        // Use economic profile revenue rate, or synthetic fallback
+        const increment = revenuePerMinute
+          ? revenuePerMinute / 60
+          : (latest.value - threshold) / 1000 * 30 * (Math.random() * 0.5 + 0.5);
         lossRef.current += increment;
         setEstimatedLoss(lossRef.current);
       }
@@ -42,7 +45,7 @@ export default function ImpactCounter({
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
-  }, [isIncident, metrics, threshold]);
+  }, [isIncident, metrics, threshold, revenuePerMinute]);
 
   if (!isIncident || estimatedLoss === 0) return null;
 
@@ -61,7 +64,7 @@ export default function ImpactCounter({
         })}
       </div>
       <p className="text-xs text-accent-red/60 mt-1">
-        Missed opportunity from degraded pricing feed
+        Revenue at risk while p99 exceeds threshold
       </p>
     </div>
   );

@@ -26,6 +26,7 @@ export default function Dashboard() {
     optimizedCode,
     riskTable,
     riskNeutralized,
+    revenuePerMinute,
   } = useAgentStreamContext();
 
   const { stocks, isStale } = useMarketData();
@@ -208,6 +209,7 @@ export default function Dashboard() {
             <ImpactCounter
               metrics={metrics}
               isIncident={isIncident}
+              revenuePerMinute={revenuePerMinute}
             />
 
             {/* p99 Latency Chart */}
