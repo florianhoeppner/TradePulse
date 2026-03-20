@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { BACKEND_URL, fetchMetricsSummary } from "./api";
+import { BACKEND_URL, fetchMetricsSummary, getEconomicProfile } from "./api";
 import type {
   AgentState,
   TimelineStepData,
@@ -92,6 +92,7 @@ export function useAgentStream() {
   const [optimizedCode, setOptimizedCode] = useState<string>("");
   const [riskTable, setRiskTable] = useState<RiskTableData | null>(null);
   const [riskNeutralized, setRiskNeutralized] = useState<RiskNeutralized | null>(null);
+  const [revenuePerMinute, setRevenuePerMinute] = useState<number | null>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -111,6 +112,18 @@ export function useAgentStream() {
     checkHealth();
     const intervalId = setInterval(checkHealth, 10_000);
     return () => clearInterval(intervalId);
+  }, []);
+
+  // Fetch economic profile once on mount for ImpactCounter calibration
+  useEffect(() => {
+    const load = async () => {
+      const res = await getEconomicProfile();
+      if (res.ok && res.data) {
+        const d = res.data as { avg_order_value_usd: number; orders_per_minute: number };
+        setRevenuePerMinute(d.avg_order_value_usd * d.orders_per_minute);
+      }
+    };
+    load();
   }, []);
 
   // Poll live p99 latency from trading service so the chart/gauge
@@ -334,6 +347,7 @@ export function useAgentStream() {
     optimizedCode,
     riskTable,
     riskNeutralized,
+    revenuePerMinute,
     resetStream,
   };
 }
